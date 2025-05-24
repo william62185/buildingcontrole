@@ -3,52 +3,20 @@
 *.sqlite
 *.sqlite3
 
-# Archivos temporales de Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Archivos de datos (CSV)
+*.csv
 
-# Entornos virtuales
-venv/
-env/
-ENV/
+# PDFs generados
+*.pdf
 
-# Archivos de respaldo
-respaldo_*/
-*.bak
-
-# Archivos temporales del sistema
-.DS_Store
-Thumbs.db
-*.tmp
-
-# Archivos PDF generados (opcional)
-recibo_pago_*.pdf
-reporte_*.pdf
-reporte_*.xlsx
-
-# Archivos de configuración del IDE
-.vscode/
+# Configuración del IDE
 .idea/
-*.swp
-*.swo
+.vscode/
 
-# Logs
-*.log
+# Respaldos
+respaldo_*/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

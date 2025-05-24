@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel, StringVar
+from tkinter import ttk, messagebox, Toplevel, StringVar, filedialog
 import sqlite3
 import datetime
 import os
@@ -11,6 +11,9 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 import shutil
+import zipfile
+import json
+from pathlib import Path
 
 # Define la clase TenantModule primero
 class TenantModule:
@@ -1569,6 +1572,314 @@ class ReportModule:
         except:
             pass
 
+
+class BackupModule:
+    def __init__(self, manager):
+        self.manager = manager
+        self.backup_config_file = "backup_config.json"
+        self.load_backup_config()
+
+    def load_backup_config(self):
+        """Carga la configuración de respaldos"""
+        try:
+            if os.path.exists(self.backup_config_file):
+                with open(self.backup_config_file, 'r') as f:
+                    self.config = json.load(f)
+            else:
+                self.config = {
+                    "auto_backup": True,
+                    "backup_folder": "Respaldos",
+                    "max_backups": 10,
+                    "include_pdfs": True,
+                    "backup_on_exit": True
+                }
+                self.save_backup_config()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error cargando configuración: {e}")
+            self.config = {}
+
+    def save_backup_config(self):
+        """Guarda la configuración de respaldos"""
+        try:
+            with open(self.backup_config_file, 'w') as f:
+                json.dump(self.config, f, indent=2)
+        except Exception as e:
+            messagebox.showerror("Error", f"Error guardando configuración: {e}")
+
+    def setup_ui(self, parent):
+        """Configura la interfaz del módulo de respaldos"""
+        frame = ttk.Frame(parent, padding="10")
+        frame.pack(fill="both", expand=True)
+
+        # Título
+        title_label = ttk.Label(frame, text="Sistema de Respaldos",
+                                font=("Helvetica", 14, "bold"))
+        title_label.pack(pady=10)
+
+        # Frame de respaldo manual
+        manual_frame = ttk.LabelFrame(frame, text="Respaldo Manual", padding="10")
+        manual_frame.pack(fill="x", pady=10)
+
+        # Botones de respaldo manual
+        btn_frame1 = ttk.Frame(manual_frame)
+        btn_frame1.pack(fill="x", pady=5)
+
+        ttk.Button(btn_frame1, text="🗄️ Crear Respaldo Completo",
+                   command=self.crear_respaldo_manual).pack(side="left", padx=(0, 10))
+
+        ttk.Button(btn_frame1, text="📁 Abrir Carpeta de Respaldos",
+                   command=self.abrir_carpeta_respaldos).pack(side="left")
+
+        # Frame de configuración automática
+        auto_frame = ttk.LabelFrame(frame, text="Configuración Automática", padding="10")
+        auto_frame.pack(fill="x", pady=10)
+
+        # Checkbox para respaldo automático
+        self.auto_backup_var = tk.BooleanVar(value=self.config.get("auto_backup", True))
+        ttk.Checkbutton(auto_frame, text="Activar respaldos automáticos al cerrar",
+                        variable=self.auto_backup_var,
+                        command=self.update_config).pack(anchor="w", pady=2)
+
+        # Checkbox para incluir PDFs
+        self.include_pdfs_var = tk.BooleanVar(value=self.config.get("include_pdfs", True))
+        ttk.Checkbutton(auto_frame, text="Incluir archivos PDF en respaldos",
+                        variable=self.include_pdfs_var,
+                        command=self.update_config).pack(anchor="w", pady=2)
+
+        # Configuración de cantidad de respaldos
+        qty_frame = ttk.Frame(auto_frame)
+        qty_frame.pack(fill="x", pady=5)
+
+        ttk.Label(qty_frame, text="Mantener últimos:").pack(side="left")
+        self.max_backups_var = tk.StringVar(value=str(self.config.get("max_backups", 10)))
+        max_backups_spin = ttk.Spinbox(qty_frame, from_=1, to=50, width=5,
+                                       textvariable=self.max_backups_var,
+                                       command=self.update_config)
+        max_backups_spin.pack(side="left", padx=5)
+        ttk.Label(qty_frame, text="respaldos").pack(side="left")
+
+        # Frame de información
+        info_frame = ttk.LabelFrame(frame, text="Información", padding="10")
+        info_frame.pack(fill="both", expand=True, pady=10)
+
+        self.info_text = tk.Text(info_frame, height=8, wrap=tk.WORD)
+        info_scrollbar = ttk.Scrollbar(info_frame, orient="vertical",
+                                       command=self.info_text.yview)
+        self.info_text.configure(yscrollcommand=info_scrollbar.set)
+
+        self.info_text.pack(side="left", fill="both", expand=True)
+        info_scrollbar.pack(side="right", fill="y")
+
+        # Cargar información inicial
+        self.actualizar_info()
+
+    def update_config(self):
+        """Actualiza la configuración cuando cambian los valores"""
+        self.config["auto_backup"] = self.auto_backup_var.get()
+        self.config["include_pdfs"] = self.include_pdfs_var.get()
+        try:
+            self.config["max_backups"] = int(self.max_backups_var.get())
+        except ValueError:
+            self.config["max_backups"] = 10
+
+        self.save_backup_config()
+
+    def crear_respaldo_manual(self):
+        """Crea un respaldo manual completo"""
+        try:
+            # Permitir al usuario elegir ubicación
+            carpeta_destino = filedialog.askdirectory(
+                title="Seleccionar carpeta para respaldo",
+                initialdir=os.path.expanduser("~")
+            )
+
+            if not carpeta_destino:
+                return
+
+            resultado = self.crear_respaldo(carpeta_destino, manual=True)
+
+            if resultado:
+                messagebox.showinfo("Respaldo Exitoso",
+                                    f"Respaldo creado exitosamente en:\n{resultado}")
+                self.actualizar_info()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error creando respaldo manual: {e}")
+
+    def crear_respaldo_automatico(self):
+        """Crea un respaldo automático al cerrar la aplicación"""
+        if not self.config.get("auto_backup", True):
+            return
+
+        try:
+            carpeta_respaldos = self.config.get("backup_folder", "Respaldos")
+            resultado = self.crear_respaldo(carpeta_respaldos, manual=False)
+
+            if resultado:
+                self.limpiar_respaldos_antiguos()
+                print(f"Respaldo automático creado: {resultado}")
+
+        except Exception as e:
+            print(f"Error en respaldo automático: {e}")
+
+    def crear_respaldo(self, carpeta_destino, manual=True):
+        """Función principal para crear respaldos"""
+        try:
+            # Crear carpeta de respaldos si no existe
+            if not os.path.exists(carpeta_destino):
+                os.makedirs(carpeta_destino)
+
+            # Generar nombre único para el respaldo
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            tipo = "Manual" if manual else "Auto"
+            nombre_respaldo = f"Respaldo_{tipo}_{timestamp}"
+
+            carpeta_respaldo = os.path.join(carpeta_destino, nombre_respaldo)
+            os.makedirs(carpeta_respaldo)
+
+            archivos_copiados = []
+
+            # 1. Copiar base de datos
+            if os.path.exists("edificio.db"):
+                shutil.copy2("edificio.db", os.path.join(carpeta_respaldo, "edificio.db"))
+                archivos_copiados.append("Base de datos (edificio.db)")
+
+            # 2. Copiar archivos de configuración
+            config_files = ["backup_config.json"]
+            for config_file in config_files:
+                if os.path.exists(config_file):
+                    shutil.copy2(config_file, os.path.join(carpeta_respaldo, config_file))
+                    archivos_copiados.append(f"Configuración ({config_file})")
+
+            # 3. Copiar PDFs si está habilitado
+            if self.config.get("include_pdfs", True):
+                pdf_files = [f for f in os.listdir(".") if f.endswith(".pdf")]
+                if pdf_files:
+                    pdf_folder = os.path.join(carpeta_respaldo, "PDFs")
+                    os.makedirs(pdf_folder)
+
+                    for pdf_file in pdf_files:
+                        shutil.copy2(pdf_file, os.path.join(pdf_folder, pdf_file))
+
+                    archivos_copiados.append(f"Archivos PDF ({len(pdf_files)} archivos)")
+
+            # 4. Crear archivo de información del respaldo
+            info_respaldo = {
+                "fecha_respaldo": datetime.datetime.now().isoformat(),
+                "tipo": tipo,
+                "archivos_incluidos": archivos_copiados,
+                "version_app": "1.1"
+            }
+
+            with open(os.path.join(carpeta_respaldo, "info_respaldo.json"), 'w') as f:
+                json.dump(info_respaldo, f, indent=2)
+
+            # 5. Crear ZIP del respaldo
+            zip_filename = f"{carpeta_respaldo}.zip"
+            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(carpeta_respaldo):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, carpeta_respaldo)
+                        zipf.write(file_path, arcname)
+
+            # Eliminar carpeta temporal, mantener solo ZIP
+            shutil.rmtree(carpeta_respaldo)
+
+            return zip_filename
+
+        except Exception as e:
+            raise Exception(f"Error creando respaldo: {e}")
+
+    def limpiar_respaldos_antiguos(self):
+        """Elimina respaldos antiguos manteniendo solo los más recientes"""
+        try:
+            carpeta_respaldos = self.config.get("backup_folder", "Respaldos")
+            max_respaldos = self.config.get("max_backups", 10)
+
+            if not os.path.exists(carpeta_respaldos):
+                return
+
+            # Obtener todos los archivos de respaldo
+            archivos_respaldo = []
+            for archivo in os.listdir(carpeta_respaldos):
+                if archivo.startswith("Respaldo_") and archivo.endswith(".zip"):
+                    ruta_completa = os.path.join(carpeta_respaldos, archivo)
+                    fecha_mod = os.path.getmtime(ruta_completa)
+                    archivos_respaldo.append((fecha_mod, ruta_completa))
+
+            # Ordenar por fecha (más reciente primero)
+            archivos_respaldo.sort(reverse=True)
+
+            # Eliminar respaldos antiguos
+            for _, ruta_archivo in archivos_respaldo[max_respaldos:]:
+                os.remove(ruta_archivo)
+                print(f"Respaldo antiguo eliminado: {os.path.basename(ruta_archivo)}")
+
+        except Exception as e:
+            print(f"Error limpiando respaldos antiguos: {e}")
+
+    def abrir_carpeta_respaldos(self):
+        """Abre la carpeta de respaldos en el explorador"""
+        try:
+            carpeta_respaldos = self.config.get("backup_folder", "Respaldos")
+
+            if not os.path.exists(carpeta_respaldos):
+                os.makedirs(carpeta_respaldos)
+
+            # Abrir carpeta en el explorador
+            if os.name == 'nt':  # Windows
+                os.startfile(carpeta_respaldos)
+            elif os.name == 'posix':  # macOS y Linux
+                os.system(f'open "{carpeta_respaldos}"')
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error abriendo carpeta: {e}")
+
+    def actualizar_info(self):
+        """Actualiza la información mostrada en el panel"""
+        try:
+            self.info_text.delete(1.0, tk.END)
+
+            info = "=== INFORMACIÓN DEL SISTEMA DE RESPALDOS ===\n\n"
+
+            # Configuración actual
+            info += "Configuración Actual:\n"
+            info += f"• Respaldo automático: {'Activado' if self.config.get('auto_backup') else 'Desactivado'}\n"
+            info += f"• Incluir PDFs: {'Sí' if self.config.get('include_pdfs') else 'No'}\n"
+            info += f"• Máximo respaldos: {self.config.get('max_backups', 10)}\n"
+            info += f"• Carpeta de respaldos: {self.config.get('backup_folder', 'Respaldos')}\n\n"
+
+            # Estado de la base de datos
+            if os.path.exists("edificio.db"):
+                tamaño_db = os.path.getsize("edificio.db")
+                fecha_db = datetime.datetime.fromtimestamp(os.path.getmtime("edificio.db"))
+                info += f"Base de Datos:\n"
+                info += f"• Tamaño: {tamaño_db / 1024:.2f} KB\n"
+                info += f"• Última modificación: {fecha_db.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+            # Archivos PDF
+            pdf_files = [f for f in os.listdir(".") if f.endswith(".pdf")]
+            if pdf_files:
+                info += f"Archivos PDF encontrados: {len(pdf_files)}\n"
+                for pdf in pdf_files[:5]:  # Mostrar solo los primeros 5
+                    info += f"• {pdf}\n"
+                if len(pdf_files) > 5:
+                    info += f"• ... y {len(pdf_files) - 5} más\n"
+            else:
+                info += "No se encontraron archivos PDF\n"
+
+            info += "\n=== RECOMENDACIONES ===\n"
+            info += "• Crea respaldos regularmente\n"
+            info += "• Guarda respaldos en ubicaciones seguras (USB, nube)\n"
+            info += "• Verifica los respaldos ocasionalmente\n"
+            info += "• Mantén múltiples copias de seguridad\n"
+
+            self.info_text.insert(tk.END, info)
+
+        except Exception as e:
+            self.info_text.insert(tk.END, f"Error actualizando información: {e}")
+
 class ApartmentManager:
     def __init__(self, root):
         self.root = root
@@ -1583,6 +1894,7 @@ class ApartmentManager:
         self.payment_module = PaymentModule(self)
         self.expense_module = ExpenseModule(self)
         self.report_module = ReportModule(self)
+        self.backup_module = BackupModule(self)
 
         # Configurar interfaz
         self.setup_ui()
@@ -1725,12 +2037,14 @@ class ApartmentManager:
         self.tab_pagos = ttk.Frame(self.notebook)
         self.tab_gastos = ttk.Frame(self.notebook)
         self.tab_reportes = ttk.Frame(self.notebook)
+        self.tab_respaldos = ttk.Frame(self.notebook)
 
         # Añadir pestañas al notebook
         self.notebook.add(self.tab_inquilinos, text='Inquilinos')
         self.notebook.add(self.tab_pagos, text='Pagos')
         self.notebook.add(self.tab_gastos, text='Gastos')
         self.notebook.add(self.tab_reportes, text='Reportes')
+        self.notebook.add(self.tab_respaldos, text='Respaldos')
 
         self.notebook.pack(expand=True, fill="both")
 
@@ -1739,6 +2053,8 @@ class ApartmentManager:
         self.payment_module.setup_ui(self.tab_pagos)
         self.expense_module.setup_ui(self.tab_gastos)
         self.report_module.setup_ui(self.tab_reportes)
+        self.backup_module.setup_ui(self.tab_respaldos)
+        self.notebook.select(self.tab_inquilinos)
 
         # Botón de respaldo en la parte inferior
         backup_frame = ttk.Frame(main_frame)
@@ -1746,6 +2062,16 @@ class ApartmentManager:
 
         ttk.Button(backup_frame, text="Crear Respaldo de Datos",
                    command=self.crear_respaldo).pack(side="right")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        """Función llamada al cerrar la aplicación"""
+        # Crear respaldo automático antes de cerrar
+        if hasattr(self, 'backup_module'):
+            self.backup_module.crear_respaldo_automatico()
+
+        # Cerrar aplicación
+        self.root.destroy()
 
 # Función principal
 def main():
