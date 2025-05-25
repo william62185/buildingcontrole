@@ -2041,7 +2041,7 @@ class ApartmentManager:
 
         # Añadir pestañas al notebook
         self.notebook.add(self.tab_inquilinos, text='Inquilinos')
-        self.notebook.add(self.tab_pagos, text='Pagos')
+        self.notebook.add(self.tab_pagos, text='Ingresos')
         self.notebook.add(self.tab_gastos, text='Gastos')
         self.notebook.add(self.tab_reportes, text='Reportes')
         self.notebook.add(self.tab_respaldos, text='Respaldos')
