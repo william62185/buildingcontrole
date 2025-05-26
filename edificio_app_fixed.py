@@ -2922,6 +2922,47 @@ class ApartmentManager:
         )
         ''')
 
+        # === MIGRACIÓN AUTOMÁTICA DE COLUMNAS ===
+        # Agregar columnas faltantes para compatibilidad con ejecutables
+        try:
+            cursor.execute("PRAGMA table_info(inquilinos)")
+            existing_columns = [col[1] for col in cursor.fetchall()]
+
+            # Definir todas las columnas nuevas que necesitamos
+            required_columns = [
+                ("identificacion", "TEXT"),
+                ("email", "TEXT"),
+                ("celular", "TEXT"),
+                ("profesion", "TEXT"),
+                ("fecha_ingreso", "TEXT"),
+                ("deposito", "REAL DEFAULT 0"),
+                ("estado", "TEXT DEFAULT 'Activo'"),
+                ("contacto_emergencia", "TEXT"),
+                ("telefono_emergencia", "TEXT"),
+                ("relacion_emergencia", "TEXT"),
+                ("notas", "TEXT")
+            ]
+
+            # Agregar solo las columnas que no existen
+            columns_added = 0
+            for col_name, col_type in required_columns:
+                if col_name not in existing_columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE inquilinos ADD COLUMN {col_name} {col_type}")
+                        columns_added += 1
+                        print(f"✅ Columna agregada automáticamente: {col_name}")
+                    except sqlite3.Error as e:
+                        print(f"⚠️ Error agregando columna {col_name}: {e}")
+
+            if columns_added > 0:
+                print(f"🔄 Migración automática completada: {columns_added} columnas agregadas")
+            else:
+                print("✅ Base de datos ya está actualizada")
+
+        except Exception as e:
+            print(f"❌ Error en migración automática: {e}")
+            # Continúa funcionando aunque falle la migración
+
         conn.commit()
         conn.close()
 
