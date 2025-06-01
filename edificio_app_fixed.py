@@ -15,14 +15,25 @@ import zipfile
 import json
 from pathlib import Path
 from tkcalendar import DateEntry
+import logging
+from tkinter import filedialog
+
+# === IMPORTACIÓN DE CALENDARIO ===
+CALENDAR_AVAILABLE = False
+try:
+    from tkcalendar import DateEntry
+    CALENDAR_AVAILABLE = True
+except ImportError:
+    pass
 
 # Define la clase TenantModule primero
+
 class TenantModule:
     def __init__(self, manager):
         self.manager = manager
 
     def setup_ui(self, parent):
-        """Configura la interfaz de gestión de inquilinos"""
+        """Configura la interfaz mejorada de gestión de inquilinos con mejor distribución"""
         # Crear canvas y scrollbar para scroll vertical
         canvas = tk.Canvas(parent)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
@@ -40,23 +51,37 @@ class TenantModule:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Ahora usar scrollable_frame en lugar de parent
+        # Frame principal
         frame = ttk.Frame(scrollable_frame, padding="10")
         frame.pack(fill="both", expand=True)
 
-        # === DASHBOARD CON ESTADÍSTICAS ===
-        dashboard_frame = ttk.LabelFrame(frame, text="📊 Dashboard - Vista General", padding="15")
-        dashboard_frame.pack(fill="x", pady=(0, 10))
+        # === LAYOUT PRINCIPAL CON COLUMNAS ===
+        main_container = ttk.Frame(frame)
+        main_container.pack(fill="both", expand=True)
+
+        # Configurar grid para dos columnas principales
+        main_container.columnconfigure(0, weight=2)  # Columna izquierda más ancha
+        main_container.columnconfigure(1, weight=1)  # Columna derecha más estrecha
+
+        # === COLUMNA IZQUIERDA ===
+        left_column = ttk.Frame(main_container)
+        left_column.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # === DASHBOARD CON ESTADÍSTICAS (MEJORADO) ===
+        dashboard_frame = ttk.LabelFrame(left_column, text="📊 Dashboard - Vista General", padding="15")
+        dashboard_frame.pack(fill="x", pady=(0, 15))
 
         # Frame para las cards de estadísticas
         stats_frame = ttk.Frame(dashboard_frame)
-        stats_frame.pack(fill="x", pady=(0, 10))
+        stats_frame.pack(fill="x", pady=(0, 15))
 
         # Configurar grid para las cards
         stats_frame.columnconfigure(0, weight=1)
         stats_frame.columnconfigure(1, weight=1)
         stats_frame.columnconfigure(2, weight=1)
         stats_frame.columnconfigure(3, weight=1)
+        stats_frame.rowconfigure(0, weight=1)
+        stats_frame.rowconfigure(1, weight=1)
 
         # Card 1: Total Inquilinos
         self.total_card = ttk.LabelFrame(stats_frame, text="👥 Total Inquilinos", padding="10")
@@ -77,155 +102,298 @@ class TenantModule:
         self.pending_label.pack()
 
         # Card 4: Renta Total Mensual
-        self.rent_card = ttk.LabelFrame(stats_frame, text="💰 Renta Total/Mes", padding="10")
+        self.rent_card = ttk.LabelFrame(stats_frame, text="💰 Ingresos/Mes", padding="10")
         self.rent_card.grid(row=0, column=3, padx=5, sticky="ew")
         self.rent_label = ttk.Label(self.rent_card, text="$0", font=("Segoe UI", 16, "bold"), foreground="#8e44ad")
         self.rent_label.pack()
+
+        # Card 5: Gastos del Mes
+        self.expenses_card = ttk.LabelFrame(stats_frame, text="📉 Gastos/Mes", padding="10")
+        self.expenses_card.grid(row=1, column=0, padx=5, pady=(10, 0), sticky="ew")
+        self.expenses_label = ttk.Label(self.expenses_card, text="$0", font=("Segoe UI", 16, "bold"),foreground="#e74c3c")
+        self.expenses_label.pack()
+
+        # Card 6: Saldo Neto del Mes
+        self.balance_card = ttk.LabelFrame(stats_frame, text="💹 Saldo Neto/Mes", padding="10")
+        self.balance_card.grid(row=1, column=1, padx=5, pady=(10, 0), sticky="ew")
+        self.balance_label = ttk.Label(self.balance_card, text="$0", font=("Segoe UI", 16, "bold"),foreground="#2c3e50")
+        self.balance_label.pack()
+
+        # Card 7: Pendientes de Pago
+        self.pending_payment_card = ttk.LabelFrame(stats_frame, text="⏰ Pendientes Pago", padding="10")
+        self.pending_payment_card.grid(row=1, column=2, padx=5, pady=(10, 0), sticky="ew")
+        self.pending_payment_label = ttk.Label(self.pending_payment_card, text="0", font=("Segoe UI", 20, "bold"),foreground="#f39c12")
+        self.pending_payment_label.pack()
 
         # Botón de actualizar estadísticas
         refresh_btn = ttk.Button(dashboard_frame, text="🔄 Actualizar Estadísticas",
                                  command=self.actualizar_estadisticas)
         refresh_btn.pack(pady=(5, 0))
 
-        # Habilitar scroll con rueda del mouse
-        def _on_mousewheel(event):
-            # Solo funcionar si no hay ventanas modales activas Y no está el scroll del listado activo
-            add_modal_active = getattr(self, '_add_modal_active', False)
-            details_modal_active = getattr(self, '_details_modal_active', False)
-            tree_scroll_active = getattr(self, '_tree_scroll_active', False)
+        # === CARDS DE ACCIÓN PRINCIPALES ===
+        actions_container = ttk.Frame(left_column)
+        actions_container.pack(fill="x", pady=(0, 15))
 
-            if not add_modal_active and not details_modal_active and not tree_scroll_active:
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        # Configurar grid para cards de acción
+        actions_container.columnconfigure(0, weight=1)
+        actions_container.columnconfigure(1, weight=1)
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # CARD PARA AGREGAR NUEVO INQUILINO
+        add_card_frame = ttk.Frame(actions_container)
+        add_card_frame.grid(row=0, column=0, sticky="ew", padx=(0, 5))
 
-        # === CARD PARA AGREGAR NUEVO INQUILINO ===
-        add_card_frame = ttk.Frame(frame)
-        add_card_frame.pack(fill="x", pady=10)
-
-        # Card clickeable para agregar inquilino
         self.add_tenant_card = tk.Frame(add_card_frame,
                                         bg="#e8f4f8",
                                         relief="raised",
                                         bd=2,
                                         cursor="hand2")
-        self.add_tenant_card.pack(fill="x", padx=20, pady=10)
+        self.add_tenant_card.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Contenido del card
-        card_content = tk.Frame(self.add_tenant_card, bg="#e8f4f8")
-        card_content.pack(fill="x", padx=30, pady=20)
+        # Contenido del card de agregar
+        add_card_content = tk.Frame(self.add_tenant_card, bg="#e8f4f8")
+        add_card_content.pack(fill="both", expand=True, padx=20, pady=15)
 
-        # Icono grande
-        icon_label = tk.Label(card_content,
-                              text="👥 ➕",
-                              font=("Segoe UI", 32),
-                              bg="#e8f4f8",
-                              fg="#2c3e50")
-        icon_label.pack()
-
-        # Título principal
-        title_label = tk.Label(card_content,
-                               text="AGREGAR NUEVO INQUILINO",
-                               font=("Segoe UI", 14, "bold"),
-                               bg="#e8f4f8",
-                               fg="#2c3e50")
-        title_label.pack(pady=(5, 2))
-
-        # Subtítulo
-        subtitle_label = tk.Label(card_content,
-                                  text="Click aquí para registrar un nuevo arrendatario",
-                                  font=("Segoe UI", 10),
+        add_icon_label = tk.Label(add_card_content,
+                                  text="👥 ➕",
+                                  font=("Segoe UI", 28),
                                   bg="#e8f4f8",
-                                  fg="#5a6c7d")
-        subtitle_label.pack()
+                                  fg="#2c3e50")
+        add_icon_label.pack()
 
-        # Efectos hover mejorados
+        add_title_label = tk.Label(add_card_content,
+                                   text="AGREGAR NUEVO\nINQUILINO",
+                                   font=("Segoe UI", 12, "bold"),
+                                   bg="#e8f4f8",
+                                   fg="#2c3e50",
+                                   justify="center")
+        add_title_label.pack(pady=(5, 2))
+
+        add_subtitle_label = tk.Label(add_card_content,
+                                      text="Registrar nuevo arrendatario",
+                                      font=("Segoe UI", 9),
+                                      bg="#e8f4f8",
+                                      fg="#5a6c7d")
+        add_subtitle_label.pack()
+
+        # CARD PARA VER LISTADO DE INQUILINOS
+        view_card_frame = ttk.Frame(actions_container)
+        view_card_frame.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+        self.view_tenant_card = tk.Frame(view_card_frame,
+                                         bg="#f0f8e8",
+                                         relief="raised",
+                                         bd=2,
+                                         cursor="hand2")
+        self.view_tenant_card.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Contenido del card de ver
+        view_card_content = tk.Frame(self.view_tenant_card, bg="#f0f8e8")
+        view_card_content.pack(fill="both", expand=True, padx=20, pady=15)
+
+        view_icon_label = tk.Label(view_card_content,
+                                   text="📋 👀",
+                                   font=("Segoe UI", 28),
+                                   bg="#f0f8e8",
+                                   fg="#2c3e50")
+        view_icon_label.pack()
+
+        view_title_label = tk.Label(view_card_content,
+                                    text="VER LISTADO DE\nINQUILINOS",
+                                    font=("Segoe UI", 12, "bold"),
+                                    bg="#f0f8e8",
+                                    fg="#2c3e50",
+                                    justify="center")
+        view_title_label.pack(pady=(5, 2))
+
+        view_subtitle_label = tk.Label(view_card_content,
+                                       text="Gestionar todos los inquilinos",
+                                       font=("Segoe UI", 9),
+                                       bg="#f0f8e8",
+                                       fg="#5a6c7d")
+        view_subtitle_label.pack()
+
+        # === ACCIONES RÁPIDAS ===
+        quick_actions_frame = ttk.LabelFrame(left_column, text="⚡ Acciones Rápidas", padding="15")
+        quick_actions_frame.pack(fill="x", pady=(0, 15))
+
+        # Frame para botones de acciones
+        btn_actions_frame = ttk.Frame(quick_actions_frame)
+        btn_actions_frame.pack(fill="x")
+
+        # Configurar columnas para botones
+        btn_actions_frame.columnconfigure(0, weight=1)
+        btn_actions_frame.columnconfigure(1, weight=1)
+        btn_actions_frame.columnconfigure(2, weight=1)
+
+        # Botones de acciones rápidas
+        ttk.Button(btn_actions_frame, text="📊 Reporte de Inquilinos",
+                   command=self.generar_reporte_inquilinos).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+
+        ttk.Button(btn_actions_frame, text="📤 Exportar Datos",
+                   command=self.exportar_datos_inquilinos).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+
+        ttk.Button(btn_actions_frame, text="📥 Importar Datos",
+                   command=self.importar_datos_inquilinos).grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+
+        # === COLUMNA DERECHA ===
+        right_column = ttk.Frame(main_container)
+        right_column.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+        # === GRÁFICO DE DISTRIBUCIÓN DE ESTADOS ===
+        chart_frame = ttk.LabelFrame(right_column, text="📈 Distribución por Estado", padding="15")
+        chart_frame.pack(fill="x", pady=(0, 15))
+
+        # Crear canvas para el gráfico
+        self.chart_canvas = tk.Canvas(chart_frame, width=250, height=200, bg="white")
+        self.chart_canvas.pack()
+
+        # === ACTIVIDAD RECIENTE ===
+        activity_frame = ttk.LabelFrame(right_column, text="🕒 Actividad Reciente", padding="15")
+        activity_frame.pack(fill="both", expand=True, pady=(0, 15))
+
+        # Área de texto para actividad reciente
+        self.activity_text = tk.Text(activity_frame, height=8, width=30, wrap=tk.WORD,
+                                     font=("Segoe UI", 9),
+                                     bg="#f8f9fa",
+                                     relief="sunken", bd=1,
+                                     state=tk.DISABLED)
+        self.activity_text.pack(fill="both", expand=True)
+
+        # Scrollbar para actividad
+        activity_scrollbar = ttk.Scrollbar(activity_frame, orient="vertical", command=self.activity_text.yview)
+        self.activity_text.configure(yscrollcommand=activity_scrollbar.set)
+
+        # === MÉTRICAS ADICIONALES ===
+        metrics_frame = ttk.LabelFrame(right_column, text="📋 Métricas Adicionales", padding="15")
+        metrics_frame.pack(fill="x", pady=(0, 15))
+
+        # Labels para métricas adicionales
+        self.ocupacion_label = ttk.Label(metrics_frame, text="🏠 Ocupación: 0%",
+                                         font=("Segoe UI", 10))
+        self.ocupacion_label.pack(anchor="w", pady=2)
+
+        self.promedio_renta_label = ttk.Label(metrics_frame, text="💰 Renta Promedio: $0",
+                                              font=("Segoe UI", 10))
+        self.promedio_renta_label.pack(anchor="w", pady=2)
+
+        self.ultimo_ingreso_label = ttk.Label(metrics_frame, text="📅 Último Ingreso: N/A",
+                                              font=("Segoe UI", 10))
+        self.ultimo_ingreso_label.pack(anchor="w", pady=2)
+
+        # === CONFIGURAR EVENTOS ===
+        self.setup_add_card_events(add_card_content, add_icon_label, add_title_label, add_subtitle_label)
+        self.setup_view_card_events(view_card_content, view_icon_label, view_title_label, view_subtitle_label)
+
+        # Habilitar scroll con rueda del mouse
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+
+        # Cargar estadísticas y datos al inicio
+        self.actualizar_estadisticas()
+        self.actualizar_grafico_estados()
+        self.actualizar_actividad_reciente()
+        self.actualizar_metricas_adicionales()
+
+    def setup_add_card_events(self, card_content, icon_label, title_label, subtitle_label):
+        """Configura los eventos del card de agregar inquilino"""
+
         def on_enter(event):
-            # Colores más vibrantes y profesionales
-            hover_bg = "#b8e6ff"  # Azul más vibrante
-            hover_border = "#007acc"  # Borde azul oscuro
-
-            self.add_tenant_card.config(
-                bg=hover_bg,
-                relief="solid",
-                bd=2,
-                highlightbackground=hover_border,
-                highlightthickness=1
-            )
+            hover_bg = "#b8e6ff"
+            self.add_tenant_card.config(bg=hover_bg, relief="solid", bd=2)
             card_content.config(bg=hover_bg)
-
-            # Cambiar colores del texto para mayor contraste
-            icon_label.config(bg=hover_bg, fg="#0056b3")  # Icono más oscuro
-            title_label.config(bg=hover_bg, fg="#0056b3")  # Título más oscuro
-            subtitle_label.config(bg=hover_bg, fg="#495057")  # Subtítulo más legible
-
-            # Efecto de "elevación" visual
-            self.add_tenant_card.configure(cursor="hand2")
+            icon_label.config(bg=hover_bg, fg="#0056b3")
+            title_label.config(bg=hover_bg, fg="#0056b3")
+            subtitle_label.config(bg=hover_bg, fg="#495057")
 
         def on_leave(event):
-            # Colores originales suaves
             original_bg = "#e8f4f8"
-
-            self.add_tenant_card.config(
-                bg=original_bg,
-                relief="raised",
-                bd=2,
-                highlightthickness=0
-            )
+            self.add_tenant_card.config(bg=original_bg, relief="raised", bd=2)
             card_content.config(bg=original_bg)
-
-            # Restaurar colores originales
             icon_label.config(bg=original_bg, fg="#2c3e50")
             title_label.config(bg=original_bg, fg="#2c3e50")
             subtitle_label.config(bg=original_bg, fg="#5a6c7d")
 
-            self.add_tenant_card.configure(cursor="hand2")
-
-        # Efecto adicional para click
-        def on_click_effect(event):
-            # Efecto visual al hacer click
-            click_bg = "#a0d8ff"
-            self.add_tenant_card.config(bg=click_bg, relief="sunken", bd=1)
-            card_content.config(bg=click_bg)
-            icon_label.config(bg=click_bg)
-            title_label.config(bg=click_bg)
-            subtitle_label.config(bg=click_bg)
-
-            # Restaurar después de un momento
-            self.add_tenant_card.after(100, lambda: on_enter(None))
-
         def on_click(event):
-            on_click_effect(event)  # Efecto visual primero
-            self.add_tenant_card.after(120, self.mostrar_formulario_agregar)  # Pequeño delay
+            self.mostrar_formulario_agregar()
 
         # Bind eventos
-        self.add_tenant_card.bind("<Enter>", on_enter)
-        self.add_tenant_card.bind("<Leave>", on_leave)
-        self.add_tenant_card.bind("<Button-1>", on_click)
-        card_content.bind("<Button-1>", on_click)
-        icon_label.bind("<Button-1>", on_click)
-        title_label.bind("<Button-1>", on_click)
-        subtitle_label.bind("<Button-1>", on_click)
+        for widget in [self.add_tenant_card, card_content, icon_label, title_label, subtitle_label]:
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            widget.bind("<Button-1>", on_click)
 
-        # Frame para el formulario (inicialmente oculto)
-        self.form_frame = ttk.LabelFrame(frame, text="📝 Registrar Nuevo Inquilino", padding="15")
-        self.form_visible = False
+    def setup_view_card_events(self, card_content, icon_label, title_label, subtitle_label):
+        """Configura los eventos del card de ver inquilinos"""
+
+        def on_enter(event):
+            hover_bg = "#c8f7c5"
+            self.view_tenant_card.config(bg=hover_bg, relief="solid", bd=2)
+            card_content.config(bg=hover_bg)
+            icon_label.config(bg=hover_bg, fg="#2e7d32")
+            title_label.config(bg=hover_bg, fg="#2e7d32")
+            subtitle_label.config(bg=hover_bg, fg="#495057")
+
+        def on_leave(event):
+            original_bg = "#f0f8e8"
+            self.view_tenant_card.config(bg=original_bg, relief="raised", bd=2)
+            card_content.config(bg=original_bg)
+            icon_label.config(bg=original_bg, fg="#2c3e50")
+            title_label.config(bg=original_bg, fg="#2c3e50")
+            subtitle_label.config(bg=original_bg, fg="#5a6c7d")
+
+        def on_click(event):
+            self.abrir_ventana_listado_inquilinos()
+
+        # Bind eventos
+        for widget in [self.view_tenant_card, card_content, icon_label, title_label, subtitle_label]:
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            widget.bind("<Button-1>", on_click)
+
+    def abrir_ventana_listado_inquilinos(self):
+        """Abre una ventana modal con el listado completo de inquilinos - VERSIÓN CORREGIDA"""
+        # Crear ventana modal
+        listado_window = tk.Toplevel()
+        listado_window.title("📋 Listado Completo de Inquilinos")
+        listado_window.geometry("1200x680")
+        listado_window.resizable(True, True)
+        listado_window.transient(self.manager.root)
+        listado_window.grab_set()
+
+        # Variables para control
+        self._listado_modal_active = True
+
+        # Frame principal
+        main_frame = ttk.Frame(listado_window)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=5)
+
+        # Título
+        title_frame = ttk.Frame(main_frame)
+        title_frame.pack(fill="x", pady=(0, 15))
+
+        title_label = tk.Label(title_frame,
+                               text="📋 Gestión Completa de Inquilinos",
+                               font=("Segoe UI", 16, "bold"),
+                               fg="#2c3e50")
+        title_label.pack()
 
         # Frame de búsqueda avanzada
-        search_frame = ttk.LabelFrame(frame, text="🔍 Búsqueda y Filtros Avanzados", padding="15")
-        search_frame.pack(fill="x", pady=10)
+        search_frame = ttk.LabelFrame(main_frame, text="🔍 Búsqueda y Filtros Avanzados", padding="15")
+        search_frame.pack(fill="x", pady=(0, 10))
 
         # Fila 1: Búsqueda general
         search_row1 = ttk.Frame(search_frame)
         search_row1.pack(fill="x", pady=5)
 
         ttk.Label(search_row1, text="🔍 Buscar:").pack(side="left", padx=(0, 5))
-        self.entry_buscar = ttk.Entry(search_row1, width=25)
-        self.entry_buscar.pack(side="left", padx=(0, 10))
-        self.entry_buscar.bind("<KeyRelease>", self.on_search_key_release)
+        self.listado_entry_buscar = ttk.Entry(search_row1, width=25)
+        self.listado_entry_buscar.pack(side="left", padx=(0, 10))
+        self.listado_entry_buscar.bind("<KeyRelease>", self.on_listado_search_key_release)
 
-        ttk.Button(search_row1, text="🔍 Buscar", command=self.aplicar_filtros).pack(side="left", padx=(0, 10))
-        ttk.Button(search_row1, text="🗑️ Limpiar", command=self.limpiar_filtros).pack(side="left")
+        ttk.Button(search_row1, text="🔍 Buscar", command=self.aplicar_filtros_listado).pack(side="left", padx=(0, 10))
+        ttk.Button(search_row1, text="🗑️ Limpiar", command=self.limpiar_filtros_listado).pack(side="left")
 
         # Fila 2: Filtros específicos
         filters_row = ttk.Frame(search_frame)
@@ -233,139 +401,170 @@ class TenantModule:
 
         # Filtro por Estado
         ttk.Label(filters_row, text="📊 Estado:").pack(side="left", padx=(0, 5))
-        self.filtro_estado = ttk.Combobox(filters_row, width=12,
-                                          values=["Todos", "Activo", "Pendiente", "Inactivo", "Moroso", "Suspendido"])
-        self.filtro_estado.set("Todos")
-        self.filtro_estado.pack(side="left", padx=(0, 15))
-        self.filtro_estado.bind("<<ComboboxSelected>>", self.on_filter_change)
+        self.listado_filtro_estado = ttk.Combobox(filters_row, width=12,
+                                                  values=["Todos", "Activo", "Pendiente", "Inactivo", "Moroso",
+                                                          "Suspendido"])
+        self.listado_filtro_estado.set("Todos")
+        self.listado_filtro_estado.pack(side="left", padx=(0, 15))
+        self.listado_filtro_estado.bind("<<ComboboxSelected>>", self.on_listado_filter_change)
 
         # Filtro por Rango de Renta
         ttk.Label(filters_row, text="💰 Renta:").pack(side="left", padx=(0, 5))
-        self.filtro_renta_min = ttk.Entry(filters_row, width=10)
-        self.filtro_renta_min.pack(side="left", padx=(0, 5))
-        self.filtro_renta_min.insert(0, "Min")
-        self.filtro_renta_min.bind("<FocusIn>", self.clear_placeholder)
-        self.filtro_renta_min.bind("<KeyRelease>", self.on_filter_change)
+        self.listado_filtro_renta_min = ttk.Entry(filters_row, width=10)
+        self.listado_filtro_renta_min.pack(side="left", padx=(0, 5))
+        self.listado_filtro_renta_min.insert(0, "Min")
+        self.listado_filtro_renta_min.bind("<FocusIn>", self.clear_placeholder_listado)
+        self.listado_filtro_renta_min.bind("<KeyRelease>", self.on_listado_filter_change)
 
         ttk.Label(filters_row, text="-").pack(side="left", padx=2)
 
-        self.filtro_renta_max = ttk.Entry(filters_row, width=10)
-        self.filtro_renta_max.pack(side="left", padx=(5, 15))
-        self.filtro_renta_max.insert(0, "Max")
-        self.filtro_renta_max.bind("<FocusIn>", self.clear_placeholder)
-        self.filtro_renta_max.bind("<KeyRelease>", self.on_filter_change)
+        self.listado_filtro_renta_max = ttk.Entry(filters_row, width=10)
+        self.listado_filtro_renta_max.pack(side="left", padx=(5, 15))
+        self.listado_filtro_renta_max.insert(0, "Max")
+        self.listado_filtro_renta_max.bind("<FocusIn>", self.clear_placeholder_listado)
+        self.listado_filtro_renta_max.bind("<KeyRelease>", self.on_listado_filter_change)
 
         # Filtro por Apartamento
         ttk.Label(filters_row, text="🏠 Apto:").pack(side="left", padx=(0, 5))
-        self.filtro_apartamento = ttk.Entry(filters_row, width=10)
-        self.filtro_apartamento.pack(side="left")
-        self.filtro_apartamento.bind("<KeyRelease>", self.on_filter_change)
+        self.listado_filtro_apartamento = ttk.Entry(filters_row, width=10)
+        self.listado_filtro_apartamento.pack(side="left")
+        self.listado_filtro_apartamento.bind("<KeyRelease>", self.on_listado_filter_change)
 
-        # Lista de inquilinos
-        list_frame = ttk.LabelFrame(frame, text="Lista de Inquilinos", padding="10")
-        list_frame.pack(fill="both", expand=True, pady=10)
+        # === FRAME PARA LA LISTA (CON ALTURA FIJA) ===
+        list_container = ttk.Frame(main_frame)
+        list_container.pack(fill="both", expand=True, pady=10)
+
+        # Frame para la lista con altura controlada
+        list_frame = ttk.LabelFrame(list_container, text="Lista de Inquilinos", padding="10")
+        list_frame.pack(fill="both", expand=True)
 
         # Treeview para mostrar inquilinos con más columnas
         columns = ("id", "nombre", "apartamento", "identificacion", "email", "celular", "estado", "renta")
-        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+        self.listado_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=15)  # ← ALTURA FIJA
 
         # Definir encabezados
-        self.tree.heading("id", text="ID")
-        self.tree.heading("nombre", text="Nombre")
-        self.tree.heading("apartamento", text="Apto")
-        self.tree.heading("identificacion", text="Identificación")
-        self.tree.heading("email", text="Email")
-        self.tree.heading("celular", text="Celular")
-        self.tree.heading("estado", text="Estado")
-        self.tree.heading("renta", text="Renta")
+        self.listado_tree.heading("id", text="ID")
+        self.listado_tree.heading("nombre", text="Nombre")
+        self.listado_tree.heading("apartamento", text="Apto")
+        self.listado_tree.heading("identificacion", text="Identificación")
+        self.listado_tree.heading("email", text="Email")
+        self.listado_tree.heading("celular", text="Celular")
+        self.listado_tree.heading("estado", text="Estado")
+        self.listado_tree.heading("renta", text="Renta")
 
         # Ajustar anchos de columna
-        self.tree.column("id", width=40)
-        self.tree.column("nombre", width=150)
-        self.tree.column("apartamento", width=50)
-        self.tree.column("identificacion", width=120)
-        self.tree.column("email", width=180)
-        self.tree.column("celular", width=100)
-        self.tree.column("estado", width=80)
-        self.tree.column("renta", width=90)
+        self.listado_tree.column("id", width=40)
+        self.listado_tree.column("nombre", width=150)
+        self.listado_tree.column("apartamento", width=50)
+        self.listado_tree.column("identificacion", width=120)
+        self.listado_tree.column("email", width=180)
+        self.listado_tree.column("celular", width=100)
+        self.listado_tree.column("estado", width=80)
+        self.listado_tree.column("renta", width=90)
 
         # Scrollbar
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
+        listado_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.listado_tree.yview)
+        self.listado_tree.configure(yscrollcommand=listado_scrollbar.set)
 
         # Empaquetar widgets
-        self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self.listado_tree.pack(side="left", fill="both", expand=True)
+        listado_scrollbar.pack(side="right", fill="y")
 
-        # === SCROLL ESPECÍFICO PARA EL LISTADO ===
-        def tree_mousewheel(event):
-            """Scroll específico para el treeview"""
+        # === BOTONES DE ACCIÓN (AHORA SIEMPRE VISIBLES) ===
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill="x", pady=15)  # ← NO expand=True, solo fill="x"
+
+        # Fila de botones principales
+        btn_row1 = ttk.Frame(btn_frame)
+        btn_row1.pack(fill="x", pady=(0, 5))
+
+        # Botones de acción con tamaño más grande y mejor visibilidad
+        btn_ver = ttk.Button(btn_row1, text="👁️ Ver Detalles",
+                             command=self.ver_detalles_inquilino_listado,
+                             width=15)
+        btn_ver.pack(side="left", padx=(0, 10))
+
+        btn_editar = ttk.Button(btn_row1, text="✏️ Editar",
+                                command=self.editar_inquilino_listado,
+                                width=15)
+        btn_editar.pack(side="left", padx=(0, 10))
+
+        btn_eliminar = ttk.Button(btn_row1, text="🗑️ Eliminar",
+                                  command=self.eliminar_inquilino_listado,
+                                  width=15)
+        btn_eliminar.pack(side="left", padx=(0, 20))
+
+        # Separador visual
+        separador = ttk.Label(btn_row1, text="|", foreground="gray")
+        separador.pack(side="left", padx=(0, 20))
+
+        # Contador de resultados
+        self.listado_results_label = ttk.Label(btn_row1, text="📊 Resultados: 0",
+                                               font=("Segoe UI", 10, "bold"),
+                                               foreground="#2c3e50")
+        self.listado_results_label.pack(side="left", padx=(0, 20))
+
+        # Botón cerrar a la derecha
+        btn_cerrar = ttk.Button(btn_row1, text="❌ Cerrar",
+                                command=lambda: self.cerrar_listado_window(listado_window),
+                                width=15)
+        btn_cerrar.pack(side="right")
+
+        # === INFORMACIÓN ADICIONAL ===
+        info_frame = ttk.Frame(btn_frame)
+        info_frame.pack(fill="x", pady=(5, 0))
+
+        info_label = ttk.Label(info_frame,
+                               text="💡 Selecciona un inquilino de la lista y usa los botones de acción",
+                               font=("Segoe UI", 9),
+                               foreground="#6c757d")
+        info_label.pack(side="left")
+
+        # Función de limpieza
+        def cleanup_and_close():
             try:
-                # Obtener la región visible del treeview
-                if self.tree.winfo_exists():
-                    # Hacer scroll del treeview
-                    self.tree.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                    return "break"  # Detener propagación
+                self._listado_modal_active = False
+                listado_window.destroy()
             except Exception as e:
-                logging.error(f"Error en scroll del treeview: {e}")
+                logging.error(f"Error en cleanup listado: {e}")
 
-        def on_tree_enter(event):
-            """Al entrar al área del listado"""
-            try:
-                # Deshabilitar scroll principal temporalmente
-                self._tree_scroll_active = True
+        # Centrar ventana
+        listado_window.update_idletasks()
+        width = 1200
+        height = 680
+        x = (listado_window.winfo_screenwidth() // 2) - (width // 2)
+        y = 5
+        listado_window.geometry(f'{width}x{height}+{x}+{y}')
 
-                # Activar scroll específico del treeview
-                self.tree.bind("<MouseWheel>", tree_mousewheel)
-                list_frame.bind("<MouseWheel>", tree_mousewheel)
-
-                # Cambiar cursor para indicar que el scroll está activo
-                self.tree.configure(cursor="arrow")
-
-            except Exception as e:
-                logging.error(f"Error activando scroll del listado: {e}")
-
-        def on_tree_leave(event):
-            """Al salir del área del listado"""
-            try:
-                # Reactivar scroll principal
-                self._tree_scroll_active = False
-
-                # Desactivar scroll específico del treeview
-                self.tree.unbind("<MouseWheel>")
-                list_frame.unbind("<MouseWheel>")
-
-            except Exception as e:
-                logging.error(f"Error desactivando scroll del listado: {e}")
-
-        # Bind eventos al frame del listado y al treeview
-        list_frame.bind("<Enter>", on_tree_enter)
-        list_frame.bind("<Leave>", on_tree_leave)
-        self.tree.bind("<Enter>", on_tree_enter)
-        self.tree.bind("<Leave>", on_tree_leave)
-
-        # Variable de control
-        self._tree_scroll_active = False
-
-        # Botones de acción
-        btn_frame2 = ttk.Frame(frame)
-        btn_frame2.pack(fill="x", pady=5)
-
-        ttk.Button(btn_frame2, text="👁️ Ver Detalles",
-                   command=self.ver_detalles_inquilino).pack(side="left", padx=(0, 5))
-        ttk.Button(btn_frame2, text="✏️ Editar Seleccionado",
-                   command=self.editar_inquilino).pack(side="left", padx=(0, 5))
-        ttk.Button(btn_frame2, text="🗑️ Eliminar Seleccionado",
-                   command=self.eliminar_inquilino).pack(side="left")
+        # Configurar protocolo de cierre
+        listado_window.protocol("WM_DELETE_WINDOW", cleanup_and_close)
 
         # Cargar inquilinos al inicio
-        self.cargar_inquilinos()
+        self.cargar_inquilinos_listado()
 
-    def cargar_inquilinos(self):
-        """Carga todos los inquilinos desde la base de datos"""
+        # Dar foco a la ventana
+        listado_window.focus_force()
+
+        logging.info("Ventana de listado de inquilinos abierta")
+
+    def cerrar_listado_window(self, window):
+        """Cierra la ventana de listado de forma segura"""
+        try:
+            self._listado_modal_active = False
+            window.destroy()
+            # Actualizar estadísticas en el dashboard principal
+            self.actualizar_estadisticas()
+        except Exception as e:
+            logging.error(f"Error cerrando ventana listado: {e}")
+
+    def cargar_inquilinos_listado(self):
+        """Carga todos los inquilinos en el treeview del listado"""
+        if not hasattr(self, 'listado_tree'):
+            return
+
         # Limpiar treeview
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        for item in self.listado_tree.get_children():
+            self.listado_tree.delete(item)
 
         # Cargar datos con los nuevos campos
         conn = sqlite3.connect('edificio.db')
@@ -393,910 +592,48 @@ class TenantModule:
                 else:
                     row_display.append(item)
 
-            self.tree.insert("", "end", values=row_display)
+            self.listado_tree.insert("", "end", values=row_display)
 
         conn.close()
 
-        # Actualizar estadísticas automáticamente
-        self.actualizar_estadisticas()
-
-    def guardar_inquilino(self):
-        """Guarda un nuevo inquilino en la base de datos con todos los campos"""
-        # Obtener valores de todos los campos
-        nombre = self.entry_nombre.get().strip()
-        identificacion = self.entry_identificacion.get().strip()
-        email = self.entry_email.get().strip()
-        celular = self.entry_celular.get().strip()
-        profesion = self.entry_profesion.get().strip()
-        apto = self.entry_apto.get().strip()
-        renta = self.entry_renta.get().strip()
-        estado = self.combo_estado.get()
-        fecha_ingreso = self.entry_fecha_ingreso.get().strip()
-        deposito = self.entry_deposito.get().strip()
-        contacto_emergencia = self.entry_contacto_emergencia.get().strip()
-        telefono_emergencia = self.entry_telefono_emergencia.get().strip()
-        relacion_emergencia = self.combo_relacion.get()
-        notas = self.text_notas.get(1.0, tk.END).strip()
-
-        # Validaciones básicas obligatorias
-        if not nombre:
-            messagebox.showwarning("Campo requerido", "El nombre es obligatorio.")
-            self.entry_nombre.focus()
-            return
-
-        if not apto:
-            messagebox.showwarning("Campo requerido", "El apartamento es obligatorio.")
-            self.entry_apto.focus()
-            return
-
-        if not renta:
-            messagebox.showwarning("Campo requerido", "La renta es obligatoria.")
-            self.entry_renta.focus()
-            return
-
-        # Validación de renta
-        try:
-            renta = float(renta)
-            if renta <= 0:
-                messagebox.showerror("Error", "La renta debe ser un número positivo.")
-                self.entry_renta.focus()
-                return
-        except ValueError:
-            messagebox.showerror("Error", "La renta debe ser un número válido.")
-            self.entry_renta.focus()
-            return
-
-        # Validación de depósito (opcional pero si se ingresa debe ser válido)
-        deposito_valor = 0
-        if deposito:
-            try:
-                deposito_valor = float(deposito)
-                if deposito_valor < 0:
-                    messagebox.showerror("Error", "El depósito no puede ser negativo.")
-                    self.entry_deposito.focus()
-                    return
-            except ValueError:
-                messagebox.showerror("Error", "El depósito debe ser un número válido.")
-                self.entry_deposito.focus()
-                return
-
-        # Validación de email (opcional pero si se ingresa debe ser válido)
-        if email and '@' not in email:
-            messagebox.showwarning("Email inválido", "Por favor ingresa un email válido.")
-            self.entry_email.focus()
-            return
-
-        # Validación de fecha (opcional pero si se ingresa debe ser válida)
-        if fecha_ingreso:
-            try:
-                datetime.datetime.fromisoformat(fecha_ingreso)
-            except ValueError:
-                messagebox.showerror("Fecha inválida", "Formato de fecha debe ser YYYY-MM-DD.")
-                self.entry_fecha_ingreso.focus()
-                return
-
-        # Verificar que no existe otro inquilino con la misma identificación (si se proporciona)
-        if identificacion:
-            conn = sqlite3.connect('edificio.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT nombre FROM inquilinos WHERE identificacion = ? AND identificacion != ''",
-                           (identificacion,))
-            resultado = cursor.fetchone()
-            if resultado:
-                messagebox.showerror("Identificación duplicada",
-                                     f"Ya existe un inquilino con la identificación {identificacion}: {resultado[0]}")
-                conn.close()
-                self.entry_identificacion.focus()
-                return
-            conn.close()
-
-        # Verificar que no existe otro inquilino en el mismo apartamento activo
-        conn = sqlite3.connect('edificio.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT nombre FROM inquilinos WHERE apartamento = ? AND estado = 'Activo'", (apto,))
-        resultado = cursor.fetchone()
-        if resultado:
-            if not messagebox.askyesno("Apartamento ocupado",
-                                       f"El apartamento {apto} ya tiene un inquilino activo: {resultado[0]}\n"
-                                       f"¿Deseas continuar de todas formas?"):
-                conn.close()
-                self.entry_apto.focus()
-                return
-
-        try:
-            # Guardar en la base de datos
-            cursor.execute("""
-                INSERT INTO inquilinos (
-                    nombre, identificacion, email, celular, profesion,
-                    apartamento, renta, estado, fecha_ingreso, deposito,
-                    contacto_emergencia, telefono_emergencia, relacion_emergencia, notas
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (nombre, identificacion, email, celular, profesion,
-                  apto, renta, estado, fecha_ingreso, deposito_valor,
-                  contacto_emergencia, telefono_emergencia, relacion_emergencia, notas))
-
-            conn.commit()
-            conn.close()
-
-            messagebox.showinfo("Éxito", f"Inquilino {nombre} registrado exitosamente en el apartamento {apto}.")
-
-            # Limpiar el formulario
-            self.limpiar_formulario()
-
-            # Recargar lista
-            self.cargar_inquilinos()
-
-            # Cerrar formulario automáticamente después de guardar
-            if hasattr(self, 'form_visible') and self.form_visible:
-                self.ocultar_formulario()
-
-            # Actualizar estadísticas del dashboard
-            self.actualizar_estadisticas()
-
-        except sqlite3.Error as e:
-            messagebox.showerror("Error de base de datos", f"Error al guardar: {e}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error inesperado: {e}")
-
-    def buscar_inquilinos(self):
-        """Método legacy - redirige a aplicar_filtros"""
-        self.aplicar_filtros()
-
-    def on_search_key_release(self, event):
-        """Realiza búsqueda al escribir"""
-        self.buscar_inquilinos()
-
-    def editar_inquilino(self):
-        """Abre ventana modal para editar el inquilino seleccionado"""
-        # Obtener item seleccionado
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para editar.")
-            return
-
-        # Obtener ID del inquilino seleccionado
-        values = self.tree.item(selected[0], "values")
-        inquilino_id = values[0]
-
-        # Obtener datos completos de la base de datos
-        conn = sqlite3.connect('edificio.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT nombre, apartamento, renta, identificacion, email, celular, profesion,
-                   fecha_ingreso, deposito, estado, contacto_emergencia, telefono_emergencia,
-                   relacion_emergencia, notas, archivo_identificacion, archivo_contrato
-            FROM inquilinos WHERE id = ?
-        """, (inquilino_id,))
-
-        datos = cursor.fetchone()
-        conn.close()
-
-        if not datos:
-            messagebox.showerror("Error", "No se pudieron cargar los datos del inquilino.")
-            return
-
-        # Abrir ventana modal de edición
-        self.mostrar_formulario_editar(inquilino_id, datos)
-
-    def mostrar_formulario_editar(self, inquilino_id, datos):
-        """Abre ventana modal para editar inquilino con datos pre-cargados"""
-
-        # Marcar que hay ventana modal activa
-        self._add_modal_active = True
-
-        # Crear ventana modal
-        edit_window = tk.Toplevel()
-        edit_window.title(f"✏️ Editar Inquilino - {datos[0]}")
-        edit_window.geometry("750x650")
-        edit_window.resizable(True, True)
-        edit_window.transient(self.manager.root)
-        edit_window.grab_set()
-
-        # === SISTEMA DE SCROLL (igual al de agregar) ===
-        main_frame = ttk.Frame(edit_window)
-        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
-
-        canvas = tk.Canvas(main_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        # Scroll con rueda del mouse
-        def modal_scroll(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            return "break"
-
-        edit_window.bind("<MouseWheel>", modal_scroll)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Función de cleanup
-        def cleanup_and_close():
-            try:
-                self._add_modal_active = False
-                edit_window.unbind("<MouseWheel>")
-                edit_window.destroy()
-            except Exception as e:
-                logging.error(f"Error en cleanup: {e}")
-
-        # Centrar ventana
-        edit_window.update_idletasks()
-        width = 750
-        height = 650
-        x = (edit_window.winfo_screenwidth() // 2) - (width // 2)
-        y = max(50, (edit_window.winfo_screenheight() // 2) - (height // 2) - 50)
-        edit_window.geometry(f'{width}x{height}+{x}+{y}')
-
-        # Crear formulario con datos pre-cargados
-        self.setup_edit_form_modal(scrollable_frame, edit_window, cleanup_and_close, inquilino_id, datos)
-
-        # Protocolo de cierre
-        edit_window.protocol("WM_DELETE_WINDOW", cleanup_and_close)
-
-        # Foco
-        edit_window.focus_force()
-
-        logging.info(f"Ventana de edición abierta para inquilino: {datos[0]}")
-
-    def eliminar_inquilino(self):
-        """Elimina el inquilino seleccionado"""
-        # Obtener item seleccionado
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para eliminar.")
-            return
-
-        # Obtener datos del inquilino seleccionado
-        values = self.tree.item(selected[0], "values")
-        inquilino_id = values[0]
-        nombre = values[1]
-
-        # Confirmar eliminación
-        if not messagebox.askyesno("Confirmar eliminación",
-                                   f"¿Estás seguro de eliminar a {nombre}?"):
-            return
-
-        # Verificar si hay pagos asociados
-        conn = sqlite3.connect('edificio.db')
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT COUNT(*) FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
-        count = cursor.fetchone()[0]
-
-        if count > 0:
-            if not messagebox.askyesno("Pagos existentes",
-                                       f"Hay {count} pagos asociados a este inquilino. "
-                                       f"¿Deseas eliminar el inquilino y todos sus pagos?"):
-                conn.close()
-                return
-
-            # Eliminar pagos asociados
-            cursor.execute("DELETE FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
-
-        # Eliminar inquilino
-        cursor.execute("DELETE FROM inquilinos WHERE id = ?", (inquilino_id,))
-
-        conn.commit()
-        conn.close()
-
-        messagebox.showinfo("Eliminado", f"Inquilino {nombre} eliminado exitosamente.")
-
-        # Recargar lista
-        self.cargar_inquilinos()
-
-    def ver_detalles_inquilino(self):
-        """Muestra todos los detalles del inquilino seleccionado en una ventana profesional"""
-        # Obtener item seleccionado
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para ver sus detalles.")
-            return
-
-        # Obtener ID del inquilino seleccionado
-        values = self.tree.item(selected[0], "values")
-        inquilino_id = values[0]
-
-        # Obtener datos completos de la base de datos
-        conn = sqlite3.connect('edificio.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT nombre, apartamento, renta, identificacion, email, celular, profesion,
-                   fecha_ingreso, deposito, estado, contacto_emergencia, telefono_emergencia,
-                   relacion_emergencia, notas, archivo_identificacion, archivo_contrato
-            FROM inquilinos WHERE id = ?
-        """, (inquilino_id,))
-
-        datos = cursor.fetchone()
-
-        if not datos:
-            conn.close()
-            messagebox.showerror("Error", "No se pudieron cargar los datos del inquilino.")
-            return
-
-        # Obtener información financiera
-        cursor.execute("SELECT SUM(monto), COUNT(*) FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
-        pago_info = cursor.fetchone()
-        total_pagado = pago_info[0] if pago_info[0] else 0
-        num_pagos = pago_info[1] if pago_info[1] else 0
-
-        # Último pago
-        cursor.execute("SELECT fecha, monto FROM pagos WHERE inquilino_id = ? ORDER BY fecha DESC LIMIT 1",
-                       (inquilino_id,))
-        ultimo_pago = cursor.fetchone()
-        conn.close()
-
-        # Crear ventana de detalles
-        details_window = tk.Toplevel()
-        details_window.title(f"📋 Detalles Completos - {datos[0]}")
-        details_window.geometry("750x700")
-        details_window.resizable(True, True)
-        details_window.transient(self.manager.root)
-        details_window.grab_set()  # Hacer ventana modal
-
-        # Configurar icono si existe
-        try:
-            details_window.iconbitmap("icon.ico")  # Si tienes un icono
-        except:
-            pass
-
-        # === CONFIGURACIÓN DE SCROLL SEGURA ===
-        def setup_scroll_system():
-            """Configura el sistema de scroll de forma segura"""
-            # Frame principal
-            main_frame = ttk.Frame(details_window)
-            main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-            # Canvas con configuración robusta
-            canvas = tk.Canvas(main_frame, highlightthickness=0, bg='#f0f0f0')
-            scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-            scrollable_frame = ttk.Frame(canvas)
-
-            # Configurar canvas
-            canvas.configure(yscrollcommand=scrollbar.set)
-
-            # Función para actualizar scroll region
-            def configure_scroll_region(event=None):
-                if canvas.winfo_exists():
-                    canvas.configure(scrollregion=canvas.bbox("all"))
-
-            scrollable_frame.bind("<Configure>", configure_scroll_region)
-            canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-            # Función mejorada para scroll con validación
-            def safe_mousewheel(event):
-                try:
-                    if canvas.winfo_exists() and details_window.winfo_exists():
-                        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                        return "break"  # ← AGREGAR ESTA LÍNEA para evitar propagación
-                except tk.TclError:
-                    pass  # Ignorar errores si la ventana fue destruida
-
-            # Función para ajustar ancho del canvas window
-            def configure_canvas_window(event):
-                try:
-                    if canvas.winfo_exists():
-                        canvas.itemconfig(canvas_window, width=event.width)
-                except tk.TclError:
-                    pass
-
-            canvas.bind("<Configure>", configure_canvas_window)
-
-            # Sistema de bind/unbind para evitar conflictos
-            def bind_scroll():
-                try:
-                    # Bind tanto al canvas como a la ventana, pero con mejor control
-                    canvas.bind("<MouseWheel>", safe_mousewheel)
-                    details_window.bind("<MouseWheel>", safe_mousewheel)
-                    # Asegurar que el canvas pueda recibir eventos
-                    canvas.focus_set()
-                except tk.TclError:
-                    pass
-
-            def unbind_scroll():
-                try:
-                    # Unbind de ambos
-                    if details_window.winfo_exists():
-                        details_window.unbind("<MouseWheel>")
-                    if canvas.winfo_exists():
-                        canvas.unbind("<MouseWheel>")
-                except tk.TclError:
-                    pass
-
-            # Control de scroll basado en posición del mouse
-            def on_enter_window(event):
-                bind_scroll()
-
-            def on_leave_window(event):
-                unbind_scroll()
-
-            # Bind a eventos de entrada y salida del mouse
-            details_window.bind("<Enter>", on_enter_window)
-            details_window.bind("<Leave>", on_leave_window)
-            canvas.bind("<Enter>", on_enter_window)
-            canvas.bind("<Leave>", on_leave_window)
-
-            # Activar scroll inicial
-            bind_scroll()
-
-            # Empaquetar widgets
-            canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-
-            return scrollable_frame, canvas, unbind_scroll
-
-        # Configurar sistema de scroll
-        scrollable_frame, canvas, unbind_scroll = setup_scroll_system()
-
-        # === ESTILOS PROFESIONALES ===
-        style_config = {
-            'header_font': ("Segoe UI", 14, "bold"),
-            'label_font': ("Segoe UI", 10, "bold"),
-            'value_font': ("Segoe UI", 10),
-            'section_font': ("Segoe UI", 12, "bold"),
-            'header_color': "#2c3e50",
-            'label_color': "#34495e",
-            'value_bg': "#ecf0f1",
-            'success_color': "#27ae60",
-            'warning_color': "#f39c12",
-            'danger_color': "#e74c3c"
-        }
-
-        # === ENCABEZADO PRINCIPAL ===
-        header_frame = ttk.Frame(scrollable_frame)
-        header_frame.pack(fill="x", pady=(0, 20))
-
-        # Título principal con icono
-        title_label = tk.Label(header_frame,
-                               text=f"📋 Información Completa del Inquilino",
-                               font=style_config['header_font'],
-                               fg=style_config['header_color'])
-        title_label.pack()
-
-        # Nombre del inquilino destacado
-        name_label = tk.Label(header_frame,
-                              text=datos[0],
-                              font=("Segoe UI", 16, "bold"),
-                              fg="#2980b9")
-        name_label.pack(pady=(5, 0))
-
-        # Separador
-        separator = ttk.Separator(scrollable_frame, orient='horizontal')
-        separator.pack(fill="x", pady=10)
-
-        # === INFORMACIÓN PERSONAL ===
-        def create_info_section(parent, title, icon, data_pairs, special_formatting=None):
-            """Crea una sección de información profesional"""
-            section_frame = ttk.LabelFrame(parent, text=f"{icon} {title}", padding="15")
-            section_frame.pack(fill="x", pady=(0, 15))
-
-            for i, (label, value) in enumerate(data_pairs):
-                row_frame = ttk.Frame(section_frame)
-                row_frame.pack(fill="x", pady=3)
-
-                # Etiqueta
-                label_widget = tk.Label(row_frame, text=f"{label}:",
-                                        font=style_config['label_font'],
-                                        fg=style_config['label_color'],
-                                        width=20, anchor='w')
-                label_widget.pack(side="left")
-
-                # Valor con formato especial si aplica
-                display_value = value or "No especificado"
-
-                if special_formatting and label in special_formatting:
-                    display_value = special_formatting[label](value)
-
-                # Determinar color de fondo según el contenido
-                bg_color = style_config['value_bg']
-                fg_color = style_config['label_color']
-
-                if label == "Estado" and value:
-                    if value == "Activo":
-                        bg_color = "#d5edda"
-                        fg_color = style_config['success_color']
-                    elif value in ["Pendiente", "Suspendido"]:
-                        bg_color = "#fff3cd"
-                        fg_color = style_config['warning_color']
-                    elif value == "Moroso":
-                        bg_color = "#f8d7da"
-                        fg_color = style_config['danger_color']
-
-                value_widget = tk.Label(row_frame, text=display_value,
-                                        font=style_config['value_font'],
-                                        fg=fg_color, bg=bg_color,
-                                        relief="sunken", bd=1,
-                                        anchor='w', padx=8, pady=2)
-                value_widget.pack(side="left", fill="x", expand=True, padx=(10, 0))
-
-        # Formateo especial para algunos campos
-        special_format = {
-            "Renta mensual": lambda x: f"${float(x):,.0f}" if x else "No especificado",
-            "Depósito": lambda x: f"${float(x):,.0f}" if x else "No especificado"
-        }
-
-        # Sección de información personal
-        personal_data = [
-            ("Nombre completo", datos[0]),
-            ("Identificación", datos[3]),
-            ("Email", datos[4]),
-            ("Celular", datos[5]),
-            ("Profesión", datos[6])
-        ]
-        create_info_section(scrollable_frame, "Información Personal", "👤", personal_data)
-
-        # Sección de arrendamiento
-        rental_data = [
-            ("Apartamento", datos[1]),
-            ("Renta mensual", datos[2]),
-            ("Estado", datos[9]),
-            ("Fecha de ingreso", datos[7]),
-            ("Depósito", datos[8])
-        ]
-        create_info_section(scrollable_frame, "Información del Arrendamiento", "🏠",
-                            rental_data, special_format)
-
-        # Sección de contacto de emergencia (solo si hay datos)
-        if any([datos[10], datos[11], datos[12]]):
-            emergency_data = [
-                ("Nombre del contacto", datos[10]),
-                ("Teléfono de emergencia", datos[11]),
-                ("Relación", datos[12])
-            ]
-            create_info_section(scrollable_frame, "Contacto de Emergencia", "🚨", emergency_data)
-
-        # Sección financiera
-        financial_format = {
-            "Total pagado": lambda x: f"${float(x):,.0f}",
-            "Último pago": lambda
-                x: f"{ultimo_pago[0]} - ${ultimo_pago[1]:,.0f}" if ultimo_pago else "Sin pagos registrados"
-        }
-
-        financial_data = [
-            ("Total pagado", total_pagado),
-            ("Número de pagos", num_pagos),
-            ("Último pago", ultimo_pago)
-        ]
-        create_info_section(scrollable_frame, "Resumen Financiero", "💰",
-                            financial_data, financial_format)
-
-        # === SECCIÓN DE ARCHIVOS ADJUNTOS ===
-        archivos_frame = ttk.LabelFrame(scrollable_frame, text="📎 Archivos Adjuntos", padding="15")
-        archivos_frame.pack(fill="x", pady=(0, 15))
-
-        # Archivo de Identificación
-        id_row = ttk.Frame(archivos_frame)
-        id_row.pack(fill="x", pady=5)
-
-        ttk.Label(id_row, text="🆔 Identificación:", font=style_config['label_font']).pack(side="left", padx=(0, 10))
-
-        if datos[14]:  # archivo_identificacion existe
-            ttk.Label(id_row, text="📁 Archivo disponible", foreground="#27ae60").pack(side="left", padx=(0, 10))
-            ttk.Button(id_row, text="👁️ Abrir",
-                       command=lambda: self.abrir_archivo(datos[14])).pack(side="left")
-        else:
-            ttk.Label(id_row, text="❌ No adjuntado", foreground="#e74c3c").pack(side="left")
-
-        # Archivo de Contrato
-        contract_row = ttk.Frame(archivos_frame)
-        contract_row.pack(fill="x", pady=5)
-
-        ttk.Label(contract_row, text="📄 Contrato:", font=style_config['label_font']).pack(side="left", padx=(0, 10))
-
-        if datos[15]:  # archivo_contrato existe
-            ttk.Label(contract_row, text="📁 Archivo disponible", foreground="#27ae60").pack(side="left", padx=(0, 10))
-            ttk.Button(contract_row, text="👁️ Abrir",
-                       command=lambda: self.abrir_archivo(datos[15])).pack(side="left")
-        else:
-            ttk.Label(contract_row, text="❌ No adjuntado", foreground="#e74c3c").pack(side="left")
-
-        # Sección de notas (solo si hay notas)
-        if datos[13] and datos[13].strip():
-            notes_frame = ttk.LabelFrame(scrollable_frame, text="📝 Notas Adicionales", padding="15")
-            notes_frame.pack(fill="x", pady=(0, 15))
-
-            notes_text = tk.Text(notes_frame, height=4, wrap=tk.WORD,
-                                 font=style_config['value_font'],
-                                 bg=style_config['value_bg'],
-                                 relief="sunken", bd=1,
-                                 state=tk.DISABLED)
-            notes_text.pack(fill="x")
-
-            # Insertar texto
-            notes_text.config(state=tk.NORMAL)
-            notes_text.insert(1.0, datos[13])
-            notes_text.config(state=tk.DISABLED)
-
-        # === BOTONES DE ACCIÓN ===
-        def create_action_buttons():
-            """Crea los botones de acción de forma segura"""
-            buttons_frame = ttk.Frame(scrollable_frame)
-            buttons_frame.pack(fill="x", pady=20)
-
-            def safe_edit():
-                """Editar inquilino de forma segura"""
-                try:
-                    cleanup_and_close()
-                    self.editar_inquilino()
-                except Exception as e:
-                    logging.error(f"Error editando desde detalles: {e}")
-
-            def safe_generate_pdf():
-                """Generar ficha PDF de forma segura"""
-                try:
-                    generate_tenant_pdf()
-                except Exception as e:
-                    logging.error(f"Error generando PDF: {e}")
-                    messagebox.showerror("Error", f"Error generando PDF: {e}")
-
-            def generate_tenant_pdf():
-                """Genera una ficha completa del inquilino en PDF"""
-                try:
-                    from reportlab.lib.pagesizes import letter
-                    from reportlab.pdfgen import canvas as pdf_canvas
-                    from reportlab.lib.units import inch
-                    import datetime
-
-                    nombre_archivo = f"ficha_inquilino_{datos[0].replace(' ', '_')}_{datos[1]}.pdf"
-
-                    c = pdf_canvas.Canvas(nombre_archivo, pagesize=letter)
-                    ancho, alto = letter
-
-                    # Encabezado profesional
-                    c.setFont("Helvetica-Bold", 18)
-                    c.drawCentredString(ancho / 2, alto - 50, "FICHA COMPLETA DEL INQUILINO")
-
-                    c.setFont("Helvetica-Bold", 14)
-                    c.drawCentredString(ancho / 2, alto - 75, f"{datos[0]} - Apartamento {datos[1]}")
-
-                    # Información detallada
-                    y = alto - 120
-                    c.setFont("Helvetica-Bold", 12)
-
-                    sections = [
-                        ("INFORMACIÓN PERSONAL", [
-                            ("Nombre:", datos[0]),
-                            ("Identificación:", datos[3] or "No especificado"),
-                            ("Email:", datos[4] or "No especificado"),
-                            ("Celular:", datos[5] or "No especificado"),
-                            ("Profesión:", datos[6] or "No especificado")
-                        ]),
-                        ("INFORMACIÓN DEL ARRENDAMIENTO", [
-                            ("Apartamento:", datos[1]),
-                            ("Renta mensual:", f"${datos[2]:,.0f}" if datos[2] else "No especificado"),
-                            ("Estado:", datos[9] or "No especificado"),
-                            ("Fecha de ingreso:", datos[7] or "No especificado"),
-                            ("Depósito:", f"${datos[8]:,.0f}" if datos[8] else "No especificado")
-                        ]),
-                        ("CONTACTO DE EMERGENCIA", [
-                            ("Nombre:", datos[10] or "No especificado"),
-                            ("Teléfono:", datos[11] or "No especificado"),
-                            ("Relación:", datos[12] or "No especificado")
-                        ]),
-                        ("RESUMEN FINANCIERO", [
-                            ("Total pagado:", f"${total_pagado:,.0f}"),
-                            ("Número de pagos:", str(num_pagos)),
-                            ("Último pago:",
-                             f"{ultimo_pago[0]} - ${ultimo_pago[1]:,.0f}" if ultimo_pago else "Sin pagos")
-                        ])
-                    ]
-
-                    for section_title, section_data in sections:
-                        c.setFont("Helvetica-Bold", 12)
-                        y -= 25
-                        c.drawString(50, y, section_title)
-                        y -= 5
-                        c.line(50, y, ancho - 50, y)
-
-                        c.setFont("Helvetica", 10)
-                        for label, value in section_data:
-                            y -= 20
-                            c.drawString(70, y, label)
-                            c.drawString(200, y, str(value))
-
-                            if y < 100:
-                                c.showPage()
-                                y = alto - 50
-
-                    # Notas al final
-                    if datos[13] and datos[13].strip():
-                        y -= 30
-                        c.setFont("Helvetica-Bold", 12)
-                        c.drawString(50, y, "NOTAS ADICIONALES")
-                        y -= 20
-                        c.setFont("Helvetica", 10)
-
-                        # Dividir notas en líneas
-                        notas_lineas = datos[13].split('\n')
-                        for linea in notas_lineas:
-                            if y < 50:
-                                c.showPage()
-                                y = alto - 50
-                            c.drawString(70, y, linea[:80])
-                            y -= 15
-
-                    # Pie de página
-                    c.setFont("Helvetica-Oblique", 8)
-                    c.drawCentredString(ancho / 2, 30,
-                                        f"Generado el {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-                    c.save()
-                    messagebox.showinfo("Ficha Generada", f"Ficha guardada como: {nombre_archivo}")
-
-                    # Abrir PDF
-                    try:
-                        import os
-                        os.startfile(nombre_archivo)
-                    except:
-                        pass
-
-                except Exception as e:
-                    raise Exception(f"Error generando ficha: {e}")
-
-            # Crear botones con estilos
-            button_style = {"padding": (10, 5)}
-
-            ttk.Button(buttons_frame, text="✏️ Editar Inquilino",
-                       command=safe_edit, **button_style).pack(side="left", padx=(0, 10))
-
-            ttk.Button(buttons_frame, text="📄 Generar Ficha PDF",
-                       command=safe_generate_pdf, **button_style).pack(side="left", padx=(0, 10))
-
-            ttk.Button(buttons_frame, text="❌ Cerrar",
-                       command=lambda: cleanup_and_close(), **button_style).pack(side="right")
-
-        # Función de limpieza DEFINIDA ANTES de usar
-        def cleanup_and_close():
-            """Limpia recursos y cierra la ventana de forma segura"""
-            try:
-                # Desactivar scroll
-                unbind_scroll()
-
-                # Limpiar bindings específicos de la ventana
-                if details_window.winfo_exists():
-                    details_window.unbind("<FocusIn>")
-                    details_window.unbind("<FocusOut>")
-                    details_window.unbind("<MouseWheel>")
-
-                # Destruir ventana
-                details_window.destroy()
-
-            except Exception as e:
-                logging.error(f"Error en cleanup: {e}")
-                try:
-                    details_window.destroy()
-                except:
-                    pass
-
-        # Crear botones de acción
-        create_action_buttons()
-
-        # === CONFIGURACIÓN FINAL DE LA VENTANA ===
-        # Centrar ventana con mejor posicionamiento
-        details_window.update_idletasks()
-        width = 750
-        height = 700
-
-        # Obtener dimensiones de la pantalla
-        screen_width = details_window.winfo_screenwidth()
-        screen_height = details_window.winfo_screenheight()
-
-        # Calcular posición centrada pero más hacia arriba
-        x = (screen_width // 2) - (width // 2)
-        y = max(50, (screen_height // 2) - (height // 2) - 80)  # Mover 80px hacia arriba y mínimo 50px del borde
-
-        # Asegurar que la ventana no se salga de la pantalla
-        if y + height > screen_height - 50:  # Dejar 50px de margen inferior
-            y = screen_height - height - 50
-
-        details_window.geometry(f'{width}x{height}+{x}+{y}')
-
-        # Configurar protocolo de cierre
-        details_window.protocol("WM_DELETE_WINDOW", cleanup_and_close)
-
-        # Configurar foco inicial en el canvas para que funcione el scroll
-        canvas.focus_set()
-
-        # Dar foco a la ventana
-        details_window.focus_force()
-
-        logging.info(f"Ventana de detalles abierta para inquilino: {datos[0]}")
-
-    def limpiar_formulario(self):
-        """Limpia todos los campos del formulario"""
-        self.entry_nombre.delete(0, tk.END)
-        self.entry_identificacion.delete(0, tk.END)
-        self.entry_email.delete(0, tk.END)
-        self.entry_celular.delete(0, tk.END)
-        self.entry_profesion.delete(0, tk.END)
-        self.entry_apto.delete(0, tk.END)
-        self.entry_renta.delete(0, tk.END)
-        self.combo_estado.set("Activo")
-        self.entry_fecha_ingreso.delete(0, tk.END)
-        self.entry_fecha_ingreso.insert(0, datetime.date.today().isoformat())
-        self.entry_deposito.delete(0, tk.END)
-        self.entry_contacto_emergencia.delete(0, tk.END)
-        self.entry_telefono_emergencia.delete(0, tk.END)
-        self.combo_relacion.set("")
-        self.text_notas.delete(1.0, tk.END)
-
-    def actualizar_estadisticas(self):
-        """Actualiza las estadísticas del dashboard"""
-        try:
-            conn = sqlite3.connect('edificio.db')
-            cursor = conn.cursor()
-
-            # Total de inquilinos
-            cursor.execute("SELECT COUNT(*) FROM inquilinos")
-            total = cursor.fetchone()[0] or 0
-
-            # Inquilinos activos
-            cursor.execute("SELECT COUNT(*) FROM inquilinos WHERE estado = 'Activo'")
-            activos = cursor.fetchone()[0] or 0
-
-            # Inquilinos pendientes/problemáticos
-            cursor.execute("""
-                SELECT COUNT(*) FROM inquilinos 
-                WHERE estado IN ('Pendiente', 'Moroso', 'Suspendido')
-            """)
-            pendientes = cursor.fetchone()[0] or 0
-
-            # Renta total mensual
-            cursor.execute("SELECT SUM(renta) FROM inquilinos WHERE estado = 'Activo'")
-            renta_total = cursor.fetchone()[0] or 0
-
-            conn.close()
-
-            # Actualizar labels
-            self.total_label.config(text=str(total))
-            self.active_label.config(text=str(activos))
-            self.pending_label.config(text=str(pendientes))
-            self.rent_label.config(text=f"${renta_total:,.0f}")
-
-            # Cambiar color según estado
-            if pendientes > 0:
-                self.pending_label.config(foreground="#e74c3c")  # Rojo si hay problemas
-            else:
-                self.pending_label.config(foreground="#27ae60")  # Verde si todo bien
-
-        except Exception as e:
-            logging.error(f"Error actualizando estadísticas: {e}")
-            messagebox.showerror("Error", f"Error actualizando estadísticas: {e}")
-
-    def clear_placeholder(self, event):
-        """Limpia los placeholders de los campos de renta"""
+        # Actualizar contador
+        total_resultados = len(self.listado_tree.get_children())
+        if hasattr(self, 'listado_results_label'):
+            self.listado_results_label.config(text=f"📊 Resultados: {total_resultados}")
+
+    def on_listado_search_key_release(self, event):
+        """Realiza búsqueda al escribir en el listado"""
+        self.aplicar_filtros_listado()
+
+    def on_listado_filter_change(self, event=None):
+        """Aplica filtros automáticamente cuando cambian en el listado"""
+        if hasattr(self, '_listado_filter_after'):
+            self.manager.root.after_cancel(self._listado_filter_after)
+        self._listado_filter_after = self.manager.root.after(300, self.aplicar_filtros_listado)
+
+    def clear_placeholder_listado(self, event):
+        """Limpia los placeholders de los campos de renta en el listado"""
         if event.widget.get() in ["Min", "Max"]:
             event.widget.delete(0, tk.END)
 
-    def on_filter_change(self, event=None):
-        """Aplica filtros automáticamente cuando cambian"""
-        # Usar after para evitar filtros muy frecuentes
-        if hasattr(self, '_filter_after'):
-            self.manager.root.after_cancel(self._filter_after)
-        self._filter_after = self.manager.root.after(300, self.aplicar_filtros)
+    def aplicar_filtros_listado(self):
+        """Aplica todos los filtros combinados en el listado"""
+        if not hasattr(self, 'listado_tree'):
+            return
 
-    def aplicar_filtros(self):
-        """Aplica todos los filtros combinados"""
         try:
             # Limpiar treeview
-            for item in self.tree.get_children():
-                self.tree.delete(item)
+            for item in self.listado_tree.get_children():
+                self.listado_tree.delete(item)
 
             # Obtener valores de filtros
-            termino_busqueda = self.entry_buscar.get().lower().strip()
-            estado_filtro = self.filtro_estado.get()
-            apartamento_filtro = self.filtro_apartamento.get().strip()
+            termino_busqueda = self.listado_entry_buscar.get().lower().strip()
+            estado_filtro = self.listado_filtro_estado.get()
+            apartamento_filtro = self.listado_filtro_apartamento.get().strip()
 
             # Filtros de renta
-            renta_min = self.filtro_renta_min.get().strip()
-            renta_max = self.filtro_renta_max.get().strip()
+            renta_min = self.listado_filtro_renta_min.get().strip()
+            renta_max = self.listado_filtro_renta_max.get().strip()
 
             # Convertir renta a números
             try:
@@ -1374,182 +711,619 @@ class TenantModule:
                     else:
                         row_display.append(item)
 
-                self.tree.insert("", "end", values=row_display)
+                self.listado_tree.insert("", "end", values=row_display)
 
             # Actualizar contador
             total_resultados = len(resultados)
-            if hasattr(self, 'results_label'):
-                self.results_label.config(text=f"📊 Resultados: {total_resultados}")
+            if hasattr(self, 'listado_results_label'):
+                self.listado_results_label.config(text=f"📊 Resultados: {total_resultados}")
 
         except Exception as e:
-            logging.error(f"Error aplicando filtros: {e}")
+            logging.error(f"Error aplicando filtros en listado: {e}")
             messagebox.showerror("Error", f"Error en filtros: {e}")
 
-    def limpiar_filtros(self):
-        """Limpia todos los filtros y muestra todos los inquilinos"""
-        self.entry_buscar.delete(0, tk.END)
-        self.filtro_estado.set("Todos")
-        self.filtro_apartamento.delete(0, tk.END)
+    def limpiar_filtros_listado(self):
+        """Limpia todos los filtros del listado"""
+        if not hasattr(self, 'listado_entry_buscar'):
+            return
+
+        self.listado_entry_buscar.delete(0, tk.END)
+        self.listado_filtro_estado.set("Todos")
+        self.listado_filtro_apartamento.delete(0, tk.END)
 
         # Restaurar placeholders
-        self.filtro_renta_min.delete(0, tk.END)
-        self.filtro_renta_min.insert(0, "Min")
-        self.filtro_renta_max.delete(0, tk.END)
-        self.filtro_renta_max.insert(0, "Max")
+        self.listado_filtro_renta_min.delete(0, tk.END)
+        self.listado_filtro_renta_min.insert(0, "Min")
+        self.listado_filtro_renta_max.delete(0, tk.END)
+        self.listado_filtro_renta_max.insert(0, "Max")
 
         # Cargar todos los inquilinos
-        self.cargar_inquilinos()
+        self.cargar_inquilinos_listado()
+
+    def ver_detalles_inquilino_listado(self):
+        """Muestra detalles del inquilino seleccionado en el listado"""
+        if not hasattr(self, 'listado_tree'):
+            return
+
+        selected = self.listado_tree.selection()
+        if not selected:
+            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para ver sus detalles.")
+            return
+
+        # Obtener ID del inquilino seleccionado
+        values = self.listado_tree.item(selected[0], "values")
+        inquilino_id = values[0]
+
+        # Usar la función existente de ver detalles
+        self.ver_detalles_inquilino_por_id(inquilino_id)
+
+    def editar_inquilino_listado(self):
+        """Edita el inquilino seleccionado en el listado"""
+        if not hasattr(self, 'listado_tree'):
+            return
+
+        selected = self.listado_tree.selection()
+        if not selected:
+            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para editar.")
+            return
+
+        # Obtener ID del inquilino seleccionado
+        values = self.listado_tree.item(selected[0], "values")
+        inquilino_id = values[0]
+
+        # Usar la función existente de editar
+        self.editar_inquilino_por_id(inquilino_id)
+
+    def eliminar_inquilino_listado(self):
+        """Elimina el inquilino seleccionado en el listado"""
+        if not hasattr(self, 'listado_tree'):
+            return
+
+        selected = self.listado_tree.selection()
+        if not selected:
+            messagebox.showwarning("Selección", "Por favor selecciona un inquilino para eliminar.")
+            return
+
+        # Obtener datos del inquilino seleccionado
+        values = self.listado_tree.item(selected[0], "values")
+        inquilino_id = values[0]
+        nombre = values[1]
+
+        # Confirmar eliminación
+        if not messagebox.askyesno("Confirmar eliminación",
+                                   f"¿Estás seguro de eliminar a {nombre}?"):
+            return
+
+        # Verificar si hay pagos asociados
+        conn = sqlite3.connect('edificio.db')
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
+        count = cursor.fetchone()[0]
+
+        if count > 0:
+            if not messagebox.askyesno("Pagos existentes",
+                                       f"Hay {count} pagos asociados a este inquilino. "
+                                       f"¿Deseas eliminar el inquilino y todos sus pagos?"):
+                conn.close()
+                return
+
+            # Eliminar pagos asociados
+            cursor.execute("DELETE FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
+
+        # Eliminar inquilino
+        cursor.execute("DELETE FROM inquilinos WHERE id = ?", (inquilino_id,))
+
+        conn.commit()
+        conn.close()
+
+        messagebox.showinfo("Eliminado", f"Inquilino {nombre} eliminado exitosamente.")
+
+        # Recargar lista
+        self.cargar_inquilinos_listado()
+        # Actualizar estadísticas
+        self.actualizar_estadisticas()
+
+    def actualizar_estadisticas(self):
+        """Actualiza las estadísticas del dashboard - VERSIÓN MEJORADA"""
+        try:
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            # Total de inquilinos
+            cursor.execute("SELECT COUNT(*) FROM inquilinos")
+            total = cursor.fetchone()[0] or 0
+
+            # Inquilinos activos
+            cursor.execute("SELECT COUNT(*) FROM inquilinos WHERE estado = 'Activo'")
+            activos = cursor.fetchone()[0] or 0
+
+            # Inquilinos pendientes/problemáticos
+            cursor.execute("""
+                SELECT COUNT(*) FROM inquilinos 
+                WHERE estado IN ('Pendiente', 'Moroso', 'Suspendido')
+            """)
+            pendientes = cursor.fetchone()[0] or 0
+
+            # Renta total mensual
+            fecha_actual = datetime.date.today()
+            mes_actual = fecha_actual.month
+            año_actual = fecha_actual.year
+
+            cursor.execute("""
+                SELECT SUM(monto) FROM pagos 
+                WHERE strftime('%Y', fecha) = ? AND strftime('%m', fecha) = ?
+            """, (str(año_actual), f"{mes_actual:02d}"))
+            renta_total = cursor.fetchone()[0] or 0
+
+            # Actualizar labels principales
+            self.total_label.config(text=str(total))
+            self.active_label.config(text=str(activos))
+            self.pending_label.config(text=str(pendientes))
+            self.rent_label.config(text=f"${renta_total:,.0f}")
+
+            # Cambiar color según estado
+            if pendientes > 0:
+                self.pending_label.config(foreground="#e74c3c")  # Rojo si hay problemas
+            else:
+                self.pending_label.config(foreground="#27ae60")  # Verde si todo bien
+
+            # Actualizar componentes adicionales
+            self.actualizar_grafico_estados()
+            self.actualizar_actividad_reciente()
+            self.actualizar_metricas_adicionales()
+
+            # === NUEVAS ESTADÍSTICAS ===
+
+            # Gastos del mes actual
+            fecha_actual = datetime.date.today()
+            mes_actual = fecha_actual.month
+            año_actual = fecha_actual.year
+
+            cursor.execute("""
+                SELECT SUM(monto) FROM gastos 
+                WHERE strftime('%Y', fecha) = ? AND strftime('%m', fecha) = ?
+            """, (str(año_actual), f"{mes_actual:02d}"))
+            gastos_mes = cursor.fetchone()[0] or 0
+
+            # Ingresos del mes actual
+            cursor.execute("""
+                SELECT SUM(monto) FROM pagos 
+                WHERE strftime('%Y', fecha) = ? AND strftime('%m', fecha) = ?
+            """, (str(año_actual), f"{mes_actual:02d}"))
+            ingresos_mes = cursor.fetchone()[0] or 0
+
+            # Saldo neto del mes
+            saldo_neto = renta_total - gastos_mes
+
+            # Inquilinos pendientes de pago (que no han pagado este mes)
+            cursor.execute("""
+                SELECT COUNT(*) FROM inquilinos i
+                WHERE i.estado = 'Activo' 
+                AND i.id NOT IN (
+                    SELECT DISTINCT p.inquilino_id 
+                    FROM pagos p 
+                    WHERE strftime('%Y', p.fecha) = ? AND strftime('%m', p.fecha) = ?
+                )
+            """, (str(año_actual), f"{mes_actual:02d}"))
+            pendientes_pago = cursor.fetchone()[0] or 0
+
+            conn.close()
+
+            # Actualizar labels de estadísticas existentes
+            self.total_label.config(text=str(total))
+            self.active_label.config(text=str(activos))
+            self.pending_label.config(text=str(pendientes))
+            self.rent_label.config(text=f"${renta_total:,.0f}")
+
+            # === ACTUALIZAR NUEVAS ESTADÍSTICAS ===
+            self.expenses_label.config(text=f"${gastos_mes:,.0f}")
+            self.balance_label.config(text=f"${saldo_neto:,.0f}")
+            self.pending_payment_label.config(text=str(pendientes_pago))
+
+            # Cambiar color del saldo según sea positivo o negativo
+            if saldo_neto >= 0:
+                self.balance_label.config(foreground="#27ae60")  # Verde
+            else:
+                self.balance_label.config(foreground="#e74c3c")  # Rojo
+
+            # Cambiar color de pendientes de pago según cantidad
+            if pendientes_pago > 0:
+                self.pending_payment_label.config(foreground="#e74c3c")  # Rojo
+            else:
+                self.pending_payment_label.config(foreground="#27ae60")  # Verde
+
+        except Exception as e:
+            logging.error(f"Error actualizando estadísticas: {e}")
+            messagebox.showerror("Error", f"Error actualizando estadísticas: {e}")
 
     def mostrar_formulario_agregar(self):
         """Abre ventana modal para agregar nuevo inquilino"""
+        # DESHABILITAR SCROLL PRINCIPAL GLOBALMENTE
+        self.manager.root.unbind_all("<MouseWheel>")
+        self.manager.root.unbind("<MouseWheel>")
+        for child in self.manager.root.winfo_children():
+            try:
+                child.unbind_all("<MouseWheel>")
+                child.unbind("<MouseWheel>")
+            except:
+                pass
         # Crear ventana modal
         add_window = tk.Toplevel()
         add_window.title("➕ Agregar Nuevo Inquilino")
-        add_window.geometry("750x650")
+        add_window.geometry("900x700")
         add_window.resizable(True, True)
         add_window.transient(self.manager.root)
-        add_window.grab_set()  # Hacer ventana modal
+        add_window.grab_set()
         self._add_modal_active = True
+        add_window.attributes('-topmost', True)  # Mantener siempre arriba
+        add_window.focus_force()
+        add_window.lift()
 
-        # === SISTEMA DE SCROLL PROBADO (igual al de detalles) ===
-        def setup_scroll_system():
-            """Configura el sistema de scroll de forma segura"""
-            # Frame principal
-            main_frame = ttk.Frame(add_window)
-            main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-            # Canvas con configuración robusta
-            canvas = tk.Canvas(main_frame, highlightthickness=0, bg='#f0f0f0')
-            scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-            scrollable_frame = ttk.Frame(canvas)
-
-            # Configurar canvas
-            canvas.configure(yscrollcommand=scrollbar.set)
-
-            # Función para actualizar scroll region
-            def configure_scroll_region(event=None):
-                if canvas.winfo_exists():
-                    canvas.configure(scrollregion=canvas.bbox("all"))
-
-            scrollable_frame.bind("<Configure>", configure_scroll_region)
-            canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-            # Función mejorada para scroll con validación
-            def safe_mousewheel(event):
-                try:
-                    if canvas.winfo_exists() and add_window.winfo_exists():
-                        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-                except tk.TclError:
-                    pass  # Ignorar errores si la ventana fue destruida
-
-            # Función para ajustar ancho del canvas window
-            def configure_canvas_window(event):
-                try:
-                    if canvas.winfo_exists():
-                        canvas.itemconfig(canvas_window, width=event.width)
-                except tk.TclError:
-                    pass
-
-            canvas.bind("<Configure>", configure_canvas_window)
-
-            # Sistema de scroll exclusivo mejorado
-            def bind_scroll():
-                try:
-                    # Solo bind a la ventana modal, no al canvas
-                    add_window.bind("<MouseWheel>", safe_mousewheel)
-                    # Asegurar que el canvas tenga foco
-                    canvas.focus_set()
-                except tk.TclError:
-                    pass
-
-            def unbind_scroll():
-                try:
-                    if add_window.winfo_exists():
-                        add_window.unbind("<MouseWheel>")
-                except tk.TclError:
-                    pass
-
-            # Control basado en entrada/salida del mouse de la ventana
-            def on_enter_window(event):
-                bind_scroll()
-
-            def on_leave_window(event):
-                unbind_scroll()
-
-            # Bind eventos de entrada y salida SOLO a la ventana principal
-            add_window.bind("<Enter>", on_enter_window)
-            add_window.bind("<Leave>", on_leave_window)
-
-            # Activar scroll inicial
-            bind_scroll()
-
-            # Variable para control de scroll
-            #self._add_window_active = True
-
-            # Empaquetar widgets
-            canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-
-            return scrollable_frame, canvas, unbind_scroll
-
-        # Configurar sistema de scroll
-        scrollable_frame, canvas, unbind_scroll = setup_scroll_system()
-
-        # Función de limpieza MEJORADA
+        # Función de limpieza
         def cleanup_and_close():
-            """Limpia recursos y cierra la ventana de forma segura"""
             try:
-                # Marcar ventana como inactiva
                 self._add_modal_active = False
 
-                # Desactivar scroll
-                unbind_scroll()
+                # REACTIVAR SCROLL PRINCIPAL (versión simple)
+                def _on_mousewheel(event):
+                    # Intentar encontrar y hacer scroll en el canvas principal
+                    try:
+                        canvas = \
+                        self.manager.root.winfo_children()[0].winfo_children()[1].winfo_children()[0].winfo_children()[
+                            0]
+                        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+                    except:
+                        pass
 
-                # Limpiar bindings específicos de la ventana
-                if add_window.winfo_exists():
-                    add_window.unbind("<Enter>")
-                    add_window.unbind("<Leave>")
-                    add_window.unbind("<MouseWheel>")
-                    add_window.unbind("<FocusIn>")
-                    add_window.unbind("<FocusOut>")
+                self.manager.root.bind_all("<MouseWheel>", _on_mousewheel)
 
-                # Destruir ventana
                 add_window.destroy()
-
             except Exception as e:
                 logging.error(f"Error en cleanup: {e}")
-                try:
-                    add_window.destroy()
-                except:
-                    pass
+
+        self.manager.root.bind_all("<MouseWheel>", lambda e: "break")
+
+        # Frame principal SIN scroll
+        main_frame = ttk.Frame(add_window)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Configurar weight para que maneje bien el resize
+        add_window.columnconfigure(0, weight=1)
+        add_window.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(0, weight=1)
 
         # Centrar ventana
         add_window.update_idletasks()
-        width = 750
-        height = 650
+        width = 900
+        height = 700
         screen_width = add_window.winfo_screenwidth()
         screen_height = add_window.winfo_screenheight()
         x = (screen_width // 2) - (width // 2)
-        y = max(50, (screen_height // 2) - (height // 2) - 80)
+        y = 5
         add_window.geometry(f'{width}x{height}+{x}+{y}')
 
-        # Crear formulario en la ventana
-        self.setup_add_form_modal(scrollable_frame, add_window, cleanup_and_close)
+        # Crear formulario en main_frame
+        self.setup_add_form_modal(main_frame, add_window, cleanup_and_close)
+
+        # FORZAR UPDATE después de crear el formulario:
+        add_window.update_idletasks()
+        main_frame.update_idletasks()
+        add_window.minsize(900, 700)
 
         # Configurar protocolo de cierre
         add_window.protocol("WM_DELETE_WINDOW", cleanup_and_close)
 
-        # Configurar foco inicial
-        canvas.focus_set()
+        # Dar foco
         add_window.focus_force()
-
         logging.info("Ventana de agregar inquilino abierta")
 
+    def generar_reporte_inquilinos(self):
+        """Genera un reporte de todos los inquilinos"""
+        try:
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT nombre, apartamento, identificacion, email, celular, estado, renta,
+                       fecha_ingreso, deposito, profesion
+                FROM inquilinos 
+                ORDER BY apartamento
+            """)
+
+            inquilinos = cursor.fetchall()
+            conn.close()
+
+            if not inquilinos:
+                messagebox.showinfo("Sin datos", "No hay inquilinos registrados para generar reporte.")
+                return
+
+            # Crear archivo de reporte
+            fecha_actual = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo = f"reporte_inquilinos_{fecha_actual}.txt"
+
+            with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("                    REPORTE DE INQUILINOS\n")
+                f.write("=" * 80 + "\n")
+                f.write(f"Fecha de generación: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total de inquilinos: {len(inquilinos)}\n")
+                f.write("=" * 80 + "\n\n")
+
+                for inquilino in inquilinos:
+                    f.write(f"Nombre: {inquilino[0] or 'N/A'}\n")
+                    f.write(f"Apartamento: {inquilino[1] or 'N/A'}\n")
+                    f.write(f"Identificación: {inquilino[2] or 'N/A'}\n")
+                    f.write(f"Email: {inquilino[3] or 'N/A'}\n")
+                    f.write(f"Celular: {inquilino[4] or 'N/A'}\n")
+                    f.write(f"Estado: {inquilino[5] or 'N/A'}\n")
+                    f.write(f"Renta: ${inquilino[6] or 0:,.0f}\n")
+                    f.write(f"Fecha ingreso: {inquilino[7] or 'N/A'}\n")
+                    f.write(f"Depósito: ${inquilino[8] or 0:,.0f}\n")
+                    f.write(f"Profesión: {inquilino[9] or 'N/A'}\n")
+                    f.write("-" * 80 + "\n\n")
+
+            messagebox.showinfo("Reporte generado", f"Reporte guardado como: {nombre_archivo}")
+
+            # Intentar abrir el archivo
+            try:
+                os.startfile(nombre_archivo)
+            except:
+                pass
+
+        except Exception as e:
+            logging.error(f"Error generando reporte: {e}")
+            messagebox.showerror("Error", f"Error generando reporte: {e}")
+
+    def exportar_datos_inquilinos(self):
+        """Exporta los datos de inquilinos a CSV"""
+        try:
+            import csv
+
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM inquilinos ORDER BY apartamento
+            """)
+
+            inquilinos = cursor.fetchall()
+
+            # Obtener nombres de columnas
+            cursor.execute("PRAGMA table_info(inquilinos)")
+            columnas = [columna[1] for columna in cursor.fetchall()]
+
+            conn.close()
+
+            if not inquilinos:
+                messagebox.showinfo("Sin datos", "No hay inquilinos para exportar.")
+                return
+
+            # Seleccionar ubicación del archivo
+            archivo = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("Archivos CSV", "*.csv"), ("Todos los archivos", "*.*")],
+                title="Guardar datos de inquilinos"
+            )
+
+            if archivo:
+                with open(archivo, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(columnas)  # Encabezados
+                    writer.writerows(inquilinos)  # Datos
+
+                messagebox.showinfo("Exportación exitosa", f"Datos exportados a: {archivo}")
+
+        except Exception as e:
+            logging.error(f"Error exportando datos: {e}")
+            messagebox.showerror("Error", f"Error exportando datos: {e}")
+
+    def importar_datos_inquilinos(self):
+        """Importa datos de inquilinos desde CSV"""
+        try:
+            import csv
+
+            archivo = filedialog.askopenfilename(
+                filetypes=[("Archivos CSV", "*.csv"), ("Todos los archivos", "*.*")],
+                title="Seleccionar archivo de inquilinos"
+            )
+
+            if not archivo:
+                return
+
+            # Leer archivo CSV
+            inquilinos_importados = []
+            with open(archivo, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    inquilinos_importados.append(row)
+
+            if not inquilinos_importados:
+                messagebox.showwarning("Archivo vacío", "El archivo no contiene datos válidos.")
+                return
+
+            # Confirmar importación
+            if not messagebox.askyesno("Confirmar importación",
+                                       f"¿Deseas importar {len(inquilinos_importados)} inquilinos?\n"
+                                       f"Los datos duplicados serán omitidos."):
+                return
+
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            importados = 0
+            omitidos = 0
+
+            for inquilino in inquilinos_importados:
+                try:
+                    # Verificar si ya existe (por nombre y apartamento)
+                    cursor.execute("""
+                        SELECT id FROM inquilinos 
+                        WHERE nombre = ? AND apartamento = ?
+                    """, (inquilino.get('nombre', ''), inquilino.get('apartamento', '')))
+
+                    if cursor.fetchone():
+                        omitidos += 1
+                        continue
+
+                    # Insertar nuevo inquilino
+                    cursor.execute("""
+                        INSERT INTO inquilinos (
+                            nombre, apartamento, renta, identificacion, email, celular,
+                            profesion, fecha_ingreso, deposito, estado, contacto_emergencia,
+                            telefono_emergencia, relacion_emergencia, notas
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        inquilino.get('nombre', ''),
+                        inquilino.get('apartamento', ''),
+                        float(inquilino.get('renta', 0)) if inquilino.get('renta') else 0,
+                        inquilino.get('identificacion', ''),
+                        inquilino.get('email', ''),
+                        inquilino.get('celular', ''),
+                        inquilino.get('profesion', ''),
+                        inquilino.get('fecha_ingreso', ''),
+                        float(inquilino.get('deposito', 0)) if inquilino.get('deposito') else 0,
+                        inquilino.get('estado', 'Activo'),
+                        inquilino.get('contacto_emergencia', ''),
+                        inquilino.get('telefono_emergencia', ''),
+                        inquilino.get('relacion_emergencia', ''),
+                        inquilino.get('notas', '')
+                    ))
+
+                    importados += 1
+
+                except Exception as e:
+                    logging.error(f"Error importando inquilino: {e}")
+                    omitidos += 1
+
+            conn.commit()
+            conn.close()
+
+            messagebox.showinfo("Importación completada",
+                                f"Importación finalizada:\n"
+                                f"• Importados: {importados}\n"
+                                f"• Omitidos: {omitidos}")
+
+            # Actualizar estadísticas
+            self.actualizar_estadisticas()
+
+        except Exception as e:
+            logging.error(f"Error importando datos: {e}")
+            messagebox.showerror("Error", f"Error importando datos: {e}")
+
+    def ver_detalles_inquilino_por_id(self, inquilino_id):
+        """Muestra detalles del inquilino por ID"""
+        try:
+            # Obtener datos completos de la base de datos
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT nombre, apartamento, renta, identificacion, email, celular, profesion,
+                       fecha_ingreso, deposito, estado, contacto_emergencia, telefono_emergencia,
+                       relacion_emergencia, notas, archivo_identificacion, archivo_contrato
+                FROM inquilinos WHERE id = ?
+            """, (inquilino_id,))
+
+            datos = cursor.fetchone()
+
+            if not datos:
+                conn.close()
+                messagebox.showerror("Error", "No se pudieron cargar los datos del inquilino.")
+                return
+
+            # Obtener información financiera
+            cursor.execute("SELECT SUM(monto), COUNT(*) FROM pagos WHERE inquilino_id = ?", (inquilino_id,))
+            pago_info = cursor.fetchone()
+            total_pagado = pago_info[0] if pago_info[0] else 0
+            num_pagos = pago_info[1] if pago_info[1] else 0
+
+            # Último pago
+            cursor.execute("SELECT fecha, monto FROM pagos WHERE inquilino_id = ? ORDER BY fecha DESC LIMIT 1",
+                           (inquilino_id,))
+            ultimo_pago = cursor.fetchone()
+            conn.close()
+
+            # Mostrar ventana de detalles
+            self.mostrar_ventana_detalles_inquilino(inquilino_id, datos, total_pagado, num_pagos, ultimo_pago)
+
+        except Exception as e:
+            logging.error(f"Error obteniendo detalles por ID: {e}")
+            messagebox.showerror("Error", f"Error obteniendo detalles: {e}")
+
+    def editar_inquilino_por_id(self, inquilino_id):
+        """Edita el inquilino por ID"""
+        try:
+            # Obtener datos completos de la base de datos
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT nombre, apartamento, renta, identificacion, email, celular, profesion,
+                       fecha_ingreso, deposito, estado, contacto_emergencia, telefono_emergencia,
+                       relacion_emergencia, notas, archivo_identificacion, archivo_contrato
+                FROM inquilinos WHERE id = ?
+            """, (inquilino_id,))
+
+            datos = cursor.fetchone()
+            conn.close()
+
+            if not datos:
+                messagebox.showerror("Error", "No se pudieron cargar los datos del inquilino.")
+                return
+
+            # Abrir ventana modal de edición
+            self.mostrar_formulario_editar(inquilino_id, datos)
+
+        except Exception as e:
+            logging.error(f"Error obteniendo datos para edición: {e}")
+            messagebox.showerror("Error", f"Error obteniendo datos: {e}")
+
+    def abrir_archivo(self, ruta_archivo):
+        """Abre un archivo adjunto"""
+        try:
+            if not ruta_archivo or not os.path.exists(ruta_archivo):
+                messagebox.showerror("Archivo no encontrado",
+                                     "El archivo no existe o fue movido de su ubicación original.")
+                return
+
+            # Abrir archivo con la aplicación predeterminada
+            import subprocess
+            import platform
+
+            if platform.system() == 'Windows':
+                os.startfile(ruta_archivo)
+            elif platform.system() == 'Darwin':  # macOS
+                subprocess.call(['open', ruta_archivo])
+            else:  # Linux
+                subprocess.call(['xdg-open', ruta_archivo])
+
+        except Exception as e:
+            logging.error(f"Error abriendo archivo: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
+
     def setup_add_form_modal(self, parent, window, cleanup_function):
-        """Configura el formulario en ventana modal"""
+        """Configura el formulario en ventana modal - VERSIÓN CON CALENDARIO MEJORADO"""
+
+        # Canvas para scroll interno del formulario
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scroll_frame = ttk.Frame(canvas)
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scroll_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Scroll con mouse en el formulario
+        def scroll_form(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<MouseWheel>", scroll_form)
 
         # Título
-        title_frame = ttk.Frame(parent)
+        title_frame = ttk.Frame(scroll_frame)
         title_frame.pack(fill="x", pady=(0, 20))
 
         title_label = tk.Label(title_frame,
@@ -1558,9 +1332,8 @@ class TenantModule:
                                fg="#2c3e50")
         title_label.pack()
 
-        # === TODO EL FORMULARIO (igual al anterior) ===
-        # Información Personal
-        personal_frame = ttk.LabelFrame(parent, text="👤 Información Personal", padding="15")
+        # === INFORMACIÓN PERSONAL ===
+        personal_frame = ttk.LabelFrame(scroll_frame, text="👤 Información Personal", padding="15")
         personal_frame.pack(fill="x", pady=(0, 10))
 
         # Fila 1
@@ -1604,7 +1377,7 @@ class TenantModule:
         row3.columnconfigure(1, weight=1)
 
         # === INFORMACIÓN DEL ARRENDAMIENTO ===
-        rental_frame = ttk.LabelFrame(parent, text="🏠 Información del Arrendamiento", padding="15")
+        rental_frame = ttk.LabelFrame(scroll_frame, text="🏠 Información del Arrendamiento", padding="15")
         rental_frame.pack(fill="x", pady=(0, 10))
 
         # Fila arrendamiento 1
@@ -1625,32 +1398,77 @@ class TenantModule:
         self.modal_estado.set("Activo")
         self.modal_estado.grid(row=0, column=5, sticky="w")
 
-        # Fila arrendamiento 2
+        # Fila arrendamiento 2 - CON CALENDARIO MEJORADO
         rent_row2 = ttk.Frame(rental_frame)
         rent_row2.pack(fill="x", pady=5)
 
         ttk.Label(rent_row2, text="Fecha ingreso:").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        try:
-            from tkcalendar import DateEntry
-            self.modal_fecha = DateEntry(rent_row2, width=12,
-                                         background='darkblue',
+
+        # === SELECTOR DE FECHA MEJORADO ===
+        if CALENDAR_AVAILABLE:
+            # Usar DateEntry con calendario visual
+            self.modal_fecha = DateEntry(rent_row2,
+                                         width=12,
+                                         background='#007acc',
                                          foreground='white',
                                          borderwidth=2,
                                          date_pattern='yyyy-mm-dd',
                                          state='readonly',
-                                         showweeknumbers=False)
+                                         showweeknumbers=False,
+                                         locale='es_ES',  # Idioma español
+                                         selectbackground='#0078d4',
+                                         selectforeground='white',
+                                         normalbackground='white',
+                                         normalforeground='black',
+                                         weekendbackground='#f0f0f0',
+                                         weekendforeground='#666666',
+                                         othermonthbackground='#f5f5f5',
+                                         othermonthforeground='#999999',
+                                         font=('Segoe UI', 9))
+
+            # Establecer fecha actual por defecto
             self.modal_fecha.set_date(datetime.date.today())
-        except ImportError:
+
+            # Tooltip informativo
+            def create_tooltip(widget, text):
+                def on_enter(event):
+                    tooltip = tk.Toplevel()
+                    tooltip.wm_overrideredirect(True)
+                    tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+                    label = tk.Label(tooltip, text=text, background="lightyellow",
+                                     relief="solid", borderwidth=1, font=("Segoe UI", 8))
+                    label.pack()
+                    widget.tooltip = tooltip
+
+                def on_leave(event):
+                    if hasattr(widget, 'tooltip'):
+                        widget.tooltip.destroy()
+                        del widget.tooltip
+
+                widget.bind("<Enter>", on_enter)
+                widget.bind("<Leave>", on_leave)
+
+            create_tooltip(self.modal_fecha, "📅 Haz clic para abrir el calendario")
+
+        else:
+            # Fallback a Entry normal si no está disponible tkcalendar
             self.modal_fecha = ttk.Entry(rent_row2, width=12)
             self.modal_fecha.insert(0, datetime.date.today().isoformat())
+
+            # Label informativo
+            info_label = ttk.Label(rent_row2, text="(YYYY-MM-DD)",
+                                   font=("Segoe UI", 8), foreground="gray")
+            info_label.grid(row=0, column=2, sticky="w", padx=(5, 0))
+
         self.modal_fecha.grid(row=0, column=1, sticky="w", padx=(0, 20))
 
-        ttk.Label(rent_row2, text="Depósito:").grid(row=0, column=2, sticky="w", padx=(0, 10))
+        ttk.Label(rent_row2, text="Depósito:").grid(row=0, column=2 if not CALENDAR_AVAILABLE else 2,
+                                                    sticky="w", padx=(0, 10))
         self.modal_deposito = ttk.Entry(rent_row2, width=15)
-        self.modal_deposito.grid(row=0, column=3, sticky="w")
+        self.modal_deposito.grid(row=0, column=3 if not CALENDAR_AVAILABLE else 3, sticky="w")
 
         # === CONTACTO DE EMERGENCIA ===
-        emergency_frame = ttk.LabelFrame(parent, text="🚨 Contacto de Emergencia", padding="15")
+        emergency_frame = ttk.LabelFrame(scroll_frame, text="🚨 Contacto de Emergencia", padding="15")
         emergency_frame.pack(fill="x", pady=(0, 10))
 
         emerg_row1 = ttk.Frame(emergency_frame)
@@ -1677,14 +1495,14 @@ class TenantModule:
         self.modal_relacion.grid(row=0, column=1, sticky="w")
 
         # === NOTAS ===
-        notes_frame = ttk.LabelFrame(parent, text="📝 Notas Adicionales", padding="15")
-        notes_frame.pack(fill="x", pady=(0, 15))
+        notes_frame = ttk.LabelFrame(scroll_frame, text="📝 Notas Adicionales", padding="15")
+        notes_frame.pack(fill="x", pady=(0, 10))
 
         self.modal_notas = tk.Text(notes_frame, height=4, width=60)
         self.modal_notas.pack(fill="x")
 
         # === ARCHIVOS ADJUNTOS ===
-        files_frame = ttk.LabelFrame(parent, text="📎 Archivos Adjuntos", padding="15")
+        files_frame = ttk.LabelFrame(scroll_frame, text="📎 Archivos Adjuntos", padding="15")
         files_frame.pack(fill="x", pady=(0, 10))
 
         files_row1 = ttk.Frame(files_frame)
@@ -1697,7 +1515,7 @@ class TenantModule:
         self.modal_id_file_label.grid(row=0, column=1, sticky="w", padx=(0, 10))
 
         ttk.Button(files_row1, text="📁 Seleccionar",
-                   command=lambda: self.seleccionar_archivo_id()).grid(row=0, column=2, padx=(0, 5))
+                   command=lambda: self.seleccionar_archivo_id_modal()).grid(row=0, column=2, padx=(0, 5))
 
         files_row2 = ttk.Frame(files_frame)
         files_row2.pack(fill="x", pady=5)
@@ -1709,14 +1527,14 @@ class TenantModule:
         self.modal_contract_file_label.grid(row=0, column=1, sticky="w", padx=(0, 10))
 
         ttk.Button(files_row2, text="📁 Seleccionar",
-                   command=lambda: self.seleccionar_archivo_contrato()).grid(row=0, column=2, padx=(0, 5))
+                   command=lambda: self.seleccionar_archivo_contrato_modal()).grid(row=0, column=2, padx=(0, 5))
 
         # Variables para almacenar rutas de archivos
         self.modal_id_file_path = None
         self.modal_contract_file_path = None
 
         # === BOTONES ===
-        btn_frame = ttk.Frame(parent)
+        btn_frame = ttk.Frame(scroll_frame)
         btn_frame.pack(fill="x", pady=20)
 
         ttk.Button(btn_frame, text="💾 Guardar Inquilino",
@@ -1725,166 +1543,8 @@ class TenantModule:
         ttk.Button(btn_frame, text="❌ Cancelar",
                    command=cleanup_function).pack(side="right")
 
-    def scroll_to_form(self):
-        """Hace scroll automático al formulario"""
-        try:
-            # Si hay un canvas padre, hacer scroll
-            parent = self.form_frame.master
-            while parent:
-                if isinstance(parent, tk.Canvas):
-                    parent.yview_moveto(0.3)  # Scroll al 30% de la página
-                    break
-                parent = parent.master
-        except Exception as e:
-            logging.error(f"Error en scroll: {e}")
-
-    def ocultar_formulario(self):
-        """Oculta el formulario y muestra el card"""
-        self.form_frame.pack_forget()
-        self.form_visible = False
-
-        # Mostrar el card nuevamente
-        add_card_frame = self.form_frame.master.winfo_children()[1]  # El frame del card
-        self.add_tenant_card.pack(fill="x", padx=20, pady=10)
-
-        # Limpiar formulario
-        try:
-            self.limpiar_formulario()
-        except:
-            pass  # Los campos pueden no existir aún
-
-    def setup_add_form(self):
-        """Configura el formulario de agregar inquilinos"""
-
-        # Limpiar contenido anterior del frame
-        for widget in self.form_frame.winfo_children():
-            widget.destroy()
-
-        # === INFORMACIÓN PERSONAL ===
-        personal_frame = ttk.LabelFrame(self.form_frame, text="Información Personal", padding="10")
-        personal_frame.pack(fill="x", pady=5)
-
-        # Fila 1
-        row1 = ttk.Frame(personal_frame)
-        row1.pack(fill="x", pady=3)
-
-        ttk.Label(row1, text="Nombre completo:").pack(side="left", padx=(0, 5))
-        self.entry_nombre = ttk.Entry(row1, width=25)
-        self.entry_nombre.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row1, text="Identificación:").pack(side="left", padx=(0, 5))
-        self.entry_identificacion = ttk.Entry(row1, width=15)
-        self.entry_identificacion.pack(side="left")
-
-        # Fila 2
-        row2 = ttk.Frame(personal_frame)
-        row2.pack(fill="x", pady=3)
-
-        ttk.Label(row2, text="Email:").pack(side="left", padx=(0, 5))
-        self.entry_email = ttk.Entry(row2, width=25)
-        self.entry_email.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row2, text="Celular:").pack(side="left", padx=(0, 5))
-        self.entry_celular = ttk.Entry(row2, width=15)
-        self.entry_celular.pack(side="left")
-
-        # Fila 3
-        row3 = ttk.Frame(personal_frame)
-        row3.pack(fill="x", pady=3)
-
-        ttk.Label(row3, text="Profesión:").pack(side="left", padx=(0, 5))
-        self.entry_profesion = ttk.Entry(row3, width=30)
-        self.entry_profesion.pack(side="left")
-
-        # === INFORMACIÓN DEL ARRENDAMIENTO ===
-        rental_frame = ttk.LabelFrame(self.form_frame, text="Información del Arrendamiento", padding="10")
-        rental_frame.pack(fill="x", pady=5)
-
-        # Fila 4
-        row4 = ttk.Frame(rental_frame)
-        row4.pack(fill="x", pady=3)
-
-        ttk.Label(row4, text="Apartamento:").pack(side="left", padx=(0, 5))
-        self.entry_apto = ttk.Entry(row4, width=10)
-        self.entry_apto.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row4, text="Renta mensual:").pack(side="left", padx=(0, 5))
-        self.entry_renta = ttk.Entry(row4, width=12)
-        self.entry_renta.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row4, text="Estado:").pack(side="left", padx=(0, 5))
-        self.combo_estado = ttk.Combobox(row4, width=12,
-                                         values=["Activo", "Pendiente", "Inactivo", "Moroso", "Suspendido"])
-        self.combo_estado.set("Activo")
-        self.combo_estado.pack(side="left")
-
-        # Fila 5
-        row5 = ttk.Frame(rental_frame)
-        row5.pack(fill="x", pady=3)
-
-        ttk.Label(row5, text="Fecha ingreso:").pack(side="left", padx=(0, 5))
-        try:
-            from tkcalendar import DateEntry
-            self.entry_fecha_ingreso = DateEntry(row5, width=12,
-                                                 background='darkblue',
-                                                 foreground='white',
-                                                 borderwidth=2,
-                                                 date_pattern='yyyy-mm-dd',
-                                                 state='readonly',
-                                                 showweeknumbers=False)
-        except ImportError:
-            self.entry_fecha_ingreso = ttk.Entry(row5, width=12)
-            self.entry_fecha_ingreso.insert(0, datetime.date.today().isoformat())
-        self.entry_fecha_ingreso.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row5, text="Depósito:").pack(side="left", padx=(0, 5))
-        self.entry_deposito = ttk.Entry(row5, width=12)
-        self.entry_deposito.pack(side="left")
-
-        # === CONTACTO DE EMERGENCIA ===
-        emergency_frame = ttk.LabelFrame(self.form_frame, text="Contacto de Emergencia", padding="10")
-        emergency_frame.pack(fill="x", pady=5)
-
-        # Fila 6
-        row6 = ttk.Frame(emergency_frame)
-        row6.pack(fill="x", pady=3)
-
-        ttk.Label(row6, text="Nombre contacto:").pack(side="left", padx=(0, 5))
-        self.entry_contacto_emergencia = ttk.Entry(row6, width=25)
-        self.entry_contacto_emergencia.pack(side="left", padx=(0, 15))
-
-        ttk.Label(row6, text="Teléfono:").pack(side="left", padx=(0, 5))
-        self.entry_telefono_emergencia = ttk.Entry(row6, width=15)
-        self.entry_telefono_emergencia.pack(side="left")
-
-        # Fila 7
-        row7 = ttk.Frame(emergency_frame)
-        row7.pack(fill="x", pady=3)
-
-        ttk.Label(row7, text="Relación:").pack(side="left", padx=(0, 5))
-        self.combo_relacion = ttk.Combobox(row7, width=15,
-                                           values=["Padre", "Madre", "Esposo/a", "Hermano/a", "Hijo/a", "Amigo/a",
-                                                   "Otro"])
-        self.combo_relacion.pack(side="left")
-
-        # === NOTAS ===
-        notes_frame = ttk.LabelFrame(self.form_frame, text="Notas Adicionales", padding="10")
-        notes_frame.pack(fill="x", pady=5)
-
-        self.text_notas = tk.Text(notes_frame, height=3, width=60)
-        self.text_notas.pack(fill="x")
-
-        # === BOTONES ===
-        btn_frame = ttk.Frame(self.form_frame)
-        btn_frame.pack(fill="x", pady=10)
-
-        ttk.Button(btn_frame, text="💾 Guardar Inquilino",
-                   command=self.guardar_inquilino).pack(side="right", padx=(5, 0))
-        ttk.Button(btn_frame, text="🗑️ Limpiar Campos",
-                   command=self.limpiar_formulario).pack(side="right")
-
     def guardar_inquilino_modal(self, window, cleanup_function):
-        """Guarda un nuevo inquilino desde la ventana modal"""
+        """Guarda un nuevo inquilino desde la ventana modal - VERSIÓN CON ARCHIVOS"""
         try:
             # Obtener valores de todos los campos MODALES
             nombre = self.modal_nombre.get().strip()
@@ -1901,10 +1561,6 @@ class TenantModule:
             telefono_emergencia = self.modal_tel_emergencia.get().strip()
             relacion_emergencia = self.modal_relacion.get()
             notas = self.modal_notas.get(1.0, tk.END).strip()
-
-            # Obtener información de archivos
-            archivo_id_path = getattr(self, 'modal_id_file_path', None)
-            archivo_contrato_path = getattr(self, 'modal_contract_file_path', None)
 
             # Validaciones básicas obligatorias
             if not nombre:
@@ -1997,7 +1653,7 @@ class TenantModule:
             inquilino_id = cursor.lastrowid
 
             # Copiar archivos adjuntos si existen
-            archivos_copiados = self.copiar_archivos_inquilino(inquilino_id, nombre)
+            archivos_copiados = self.copiar_archivos_inquilino_modal(inquilino_id, nombre)
 
             # Actualizar rutas de archivos en la base de datos
             if archivos_copiados:
@@ -2030,8 +1686,7 @@ class TenantModule:
 
             messagebox.showinfo("✅ Éxito", mensaje_exito)
 
-            # Recargar lista y estadísticas
-            self.cargar_inquilinos()
+            # Actualizar estadísticas
             self.actualizar_estadisticas()
 
             # Cerrar ventana modal
@@ -2042,9 +1697,17 @@ class TenantModule:
         except Exception as e:
             messagebox.showerror("Error", f"Error inesperado: {e}")
 
-    def seleccionar_archivo_id(self):
+    def seleccionar_archivo_id_modal(self):
         """Selecciona archivo de identificación"""
         try:
+            # Temporalmente desactivar topmost para el diálogo
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes'):
+                    try:
+                        window.attributes('-topmost', False)
+                    except:
+                        pass
+
             file_path = filedialog.askopenfilename(
                 title="Seleccionar archivo de identificación",
                 filetypes=[
@@ -2055,6 +1718,15 @@ class TenantModule:
                 ]
             )
 
+            # Reactivar topmost después del diálogo
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes') and 'Agregar' in str(window.title):
+                    try:
+                        window.attributes('-topmost', True)
+                        window.lift()
+                    except:
+                        pass
+
             if file_path:
                 self.modal_id_file_path = file_path
                 filename = os.path.basename(file_path)
@@ -2064,9 +1736,17 @@ class TenantModule:
             logging.error(f"Error seleccionando archivo ID: {e}")
             messagebox.showerror("Error", f"Error seleccionando archivo: {e}")
 
-    def seleccionar_archivo_contrato(self):
+    def seleccionar_archivo_contrato_modal(self):
         """Selecciona archivo de contrato"""
         try:
+            # Temporalmente desactivar topmost
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes'):
+                    try:
+                        window.attributes('-topmost', False)
+                    except:
+                        pass
+
             file_path = filedialog.askopenfilename(
                 title="Seleccionar contrato de arrendamiento",
                 filetypes=[
@@ -2077,6 +1757,15 @@ class TenantModule:
                 ]
             )
 
+            # Reactivar topmost
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes') and 'Agregar' in str(window.title):
+                    try:
+                        window.attributes('-topmost', True)
+                        window.lift()
+                    except:
+                        pass
+
             if file_path:
                 self.modal_contract_file_path = file_path
                 filename = os.path.basename(file_path)
@@ -2086,7 +1775,7 @@ class TenantModule:
             logging.error(f"Error seleccionando archivo contrato: {e}")
             messagebox.showerror("Error", f"Error seleccionando archivo: {e}")
 
-    def copiar_archivos_inquilino(self, inquilino_id, nombre_inquilino):
+    def copiar_archivos_inquilino_modal(self, inquilino_id, nombre_inquilino):
         """Copia los archivos adjuntos a la carpeta del inquilino"""
         try:
             # Crear carpeta para archivos del inquilino
@@ -2098,7 +1787,7 @@ class TenantModule:
             archivos_copiados = {}
 
             # Copiar archivo de identificación
-            if self.modal_id_file_path:
+            if hasattr(self, 'modal_id_file_path') and self.modal_id_file_path:
                 extension = os.path.splitext(self.modal_id_file_path)[1]
                 nuevo_nombre = f"identificacion_{inquilino_id}{extension}"
                 ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
@@ -2107,7 +1796,7 @@ class TenantModule:
                 archivos_copiados['identificacion'] = ruta_destino
 
             # Copiar archivo de contrato
-            if self.modal_contract_file_path:
+            if hasattr(self, 'modal_contract_file_path') and self.modal_contract_file_path:
                 extension = os.path.splitext(self.modal_contract_file_path)[1]
                 nuevo_nombre = f"contrato_{inquilino_id}{extension}"
                 ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
@@ -2121,31 +1810,454 @@ class TenantModule:
             logging.error(f"Error copiando archivos: {e}")
             return {}
 
-    def abrir_archivo(self, ruta_archivo):
-        """Abre un archivo adjunto"""
-        try:
-            if not ruta_archivo or not os.path.exists(ruta_archivo):
-                messagebox.showerror("Archivo no encontrado",
-                                     "El archivo no existe o fue movido de su ubicación original.")
-                return
+    def mostrar_ventana_detalles_inquilino(self, inquilino_id, datos, total_pagado, num_pagos, ultimo_pago):
+        """Muestra la ventana de detalles del inquilino - VERSIÓN CORREGIDA"""
 
-            # Abrir archivo con la aplicación predeterminada del sistema
-            import subprocess
-            import platform
+        # Crear ventana de detalles
+        details_window = tk.Toplevel()
+        details_window.title(f"📋 Detalles Completos - {datos[0]}")
+        details_window.geometry("800x700")
+        details_window.resizable(True, True)
+        details_window.transient(self.manager.root)
+        details_window.grab_set()
 
-            if platform.system() == 'Windows':
-                os.startfile(ruta_archivo)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.call(['open', ruta_archivo])
-            else:  # Linux
-                subprocess.call(['xdg-open', ruta_archivo])
+        # === CONFIGURACIÓN DE LAYOUT MEJORADO ===
 
-        except Exception as e:
-            logging.error(f"Error abriendo archivo: {e}")
-            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
+        # Frame principal
+        main_container = ttk.Frame(details_window)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # === ÁREA DE CONTENIDO CON SCROLL (ALTURA CONTROLADA) ===
+        content_frame = ttk.Frame(main_container)
+        content_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Canvas y scrollbar para el contenido
+        canvas = tk.Canvas(content_frame, highlightthickness=0, bg='#f0f0f0')
+        scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        # Configurar canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def configure_scroll_region(event=None):
+            if canvas.winfo_exists():
+                canvas.configure(scrollregion=canvas.bbox("all"))
+
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        # Función para scroll con mouse
+        def safe_mousewheel(event):
+            try:
+                if canvas.winfo_exists() and details_window.winfo_exists():
+                    canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        def configure_canvas_window(event):
+            try:
+                if canvas.winfo_exists():
+                    canvas.itemconfig(canvas_window, width=event.width)
+            except tk.TclError:
+                pass
+
+        canvas.bind("<Configure>", configure_canvas_window)
+        details_window.bind("<MouseWheel>", safe_mousewheel)
+
+        # Empaquetar canvas y scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # === CONTENIDO DE LA VENTANA ===
+
+        # Encabezado principal
+        header_frame = ttk.Frame(scrollable_frame)
+        header_frame.pack(fill="x", pady=(0, 20))
+
+        title_label = tk.Label(header_frame,
+                               text=f"📋 Información Completa del Inquilino",
+                               font=("Segoe UI", 14, "bold"),
+                               fg="#2c3e50")
+        title_label.pack()
+
+        name_label = tk.Label(header_frame,
+                              text=datos[0],
+                              font=("Segoe UI", 16, "bold"),
+                              fg="#2980b9")
+        name_label.pack(pady=(5, 0))
+
+        # Separador
+        separator = ttk.Separator(scrollable_frame, orient='horizontal')
+        separator.pack(fill="x", pady=10)
+
+        # Función auxiliar para crear secciones
+        def create_info_section(parent, title, icon, data_pairs, special_formatting=None):
+            section_frame = ttk.LabelFrame(parent, text=f"{icon} {title}", padding="15")
+            section_frame.pack(fill="x", pady=(0, 15))
+
+            for label, value in data_pairs:
+                row_frame = ttk.Frame(section_frame)
+                row_frame.pack(fill="x", pady=3)
+
+                label_widget = tk.Label(row_frame, text=f"{label}:",
+                                        font=("Segoe UI", 10, "bold"),
+                                        fg="#34495e",
+                                        width=20, anchor='w')
+                label_widget.pack(side="left")
+
+                display_value = value or "No especificado"
+
+                if special_formatting and label in special_formatting:
+                    display_value = special_formatting[label](value)
+
+                # Determinar color según contenido
+                bg_color = "#ecf0f1"
+                fg_color = "#34495e"
+
+                if label == "Estado" and value:
+                    if value == "Activo":
+                        bg_color = "#d5edda"
+                        fg_color = "#27ae60"
+                    elif value in ["Pendiente", "Suspendido"]:
+                        bg_color = "#fff3cd"
+                        fg_color = "#f39c12"
+                    elif value == "Moroso":
+                        bg_color = "#f8d7da"
+                        fg_color = "#e74c3c"
+
+                value_widget = tk.Label(row_frame, text=display_value,
+                                        font=("Segoe UI", 10),
+                                        fg=fg_color, bg=bg_color,
+                                        relief="sunken", bd=1,
+                                        anchor='w', padx=8, pady=2)
+                value_widget.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+        # Formateo especial
+        special_format = {
+            "Renta mensual": lambda x: f"${float(x):,.0f}" if x else "No especificado",
+            "Depósito": lambda x: f"${float(x):,.0f}" if x else "No especificado"
+        }
+
+        # Sección de información personal
+        personal_data = [
+            ("Nombre completo", datos[0]),
+            ("Identificación", datos[3]),
+            ("Email", datos[4]),
+            ("Celular", datos[5]),
+            ("Profesión", datos[6])
+        ]
+        create_info_section(scrollable_frame, "Información Personal", "👤", personal_data)
+
+        # Sección de arrendamiento
+        rental_data = [
+            ("Apartamento", datos[1]),
+            ("Renta mensual", datos[2]),
+            ("Estado", datos[9]),
+            ("Fecha de ingreso", datos[7]),
+            ("Depósito", datos[8])
+        ]
+        create_info_section(scrollable_frame, "Información del Arrendamiento", "🏠",
+                            rental_data, special_format)
+
+        # Sección de contacto de emergencia (solo si hay datos)
+        if any([datos[10], datos[11], datos[12]]):
+            emergency_data = [
+                ("Nombre del contacto", datos[10]),
+                ("Teléfono de emergencia", datos[11]),
+                ("Relación", datos[12])
+            ]
+            create_info_section(scrollable_frame, "Contacto de Emergencia", "🚨", emergency_data)
+
+        # Sección financiera
+        financial_format = {
+            "Total pagado": lambda x: f"${float(x):,.0f}",
+            "Último pago": lambda
+                x: f"{ultimo_pago[0]} - ${ultimo_pago[1]:,.0f}" if ultimo_pago else "Sin pagos registrados"
+        }
+
+        financial_data = [
+            ("Total pagado", total_pagado),
+            ("Número de pagos", num_pagos),
+            ("Último pago", ultimo_pago)
+        ]
+        create_info_section(scrollable_frame, "Resumen Financiero", "💰",
+                            financial_data, financial_format)
+
+        # Sección de archivos adjuntos
+        if datos[14] or datos[15]:  # Si hay archivos
+            archivos_frame = ttk.LabelFrame(scrollable_frame, text="📎 Archivos Adjuntos", padding="15")
+            archivos_frame.pack(fill="x", pady=(0, 15))
+
+            if datos[14]:  # archivo_identificacion
+                id_row = ttk.Frame(archivos_frame)
+                id_row.pack(fill="x", pady=5)
+                ttk.Label(id_row, text="🆔 Identificación:", font=("Segoe UI", 10, "bold")).pack(side="left",
+                                                                                                padx=(0, 10))
+                ttk.Label(id_row, text="📁 Archivo disponible", foreground="#27ae60").pack(side="left", padx=(0, 10))
+                ttk.Button(id_row, text="👁️ Abrir",
+                           command=lambda: self.abrir_archivo(datos[14])).pack(side="left")
+
+            if datos[15]:  # archivo_contrato
+                contract_row = ttk.Frame(archivos_frame)
+                contract_row.pack(fill="x", pady=5)
+                ttk.Label(contract_row, text="📄 Contrato:", font=("Segoe UI", 10, "bold")).pack(side="left",
+                                                                                                padx=(0, 10))
+                ttk.Label(contract_row, text="📁 Archivo disponible", foreground="#27ae60").pack(side="left",
+                                                                                                padx=(0, 10))
+                ttk.Button(contract_row, text="👁️ Abrir",
+                           command=lambda: self.abrir_archivo(datos[15])).pack(side="left")
+
+        # Sección de notas
+        if datos[13] and datos[13].strip():
+            notes_frame = ttk.LabelFrame(scrollable_frame, text="📝 Notas Adicionales", padding="15")
+            notes_frame.pack(fill="x", pady=(0, 20))
+
+            notes_text = tk.Text(notes_frame, height=4, wrap=tk.WORD,
+                                 font=("Segoe UI", 10),
+                                 bg="#ecf0f1",
+                                 relief="sunken", bd=1,
+                                 state=tk.DISABLED)
+            notes_text.pack(fill="x")
+
+            notes_text.config(state=tk.NORMAL)
+            notes_text.insert(1.0, datos[13])
+            notes_text.config(state=tk.DISABLED)
+
+        # === BOTONES DE ACCIÓN (SIEMPRE VISIBLES) ===
+        buttons_frame = ttk.Frame(main_container)
+        buttons_frame.pack(fill="x", pady=(10, 0))  # ← NO expand=True, solo fill="x"
+
+        # Separador visual
+        sep = ttk.Separator(buttons_frame, orient='horizontal')
+        sep.pack(fill="x", pady=(0, 10))
+
+        # Frame para los botones
+        btn_row = ttk.Frame(buttons_frame)
+        btn_row.pack(fill="x")
+
+        def safe_edit():
+            """Editar inquilino de forma segura"""
+            try:
+                details_window.destroy()
+                self.editar_inquilino_por_id(inquilino_id)
+            except Exception as e:
+                logging.error(f"Error editando desde detalles: {e}")
+
+        def safe_generate_pdf():
+            """Generar ficha PDF de forma segura"""
+            try:
+                generate_tenant_pdf()
+            except Exception as e:
+                logging.error(f"Error generando PDF: {e}")
+                messagebox.showerror("Error", f"Error generando PDF: {e}")
+
+        def generate_tenant_pdf():
+            """Genera una ficha completa del inquilino en PDF"""
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.pdfgen import canvas as pdf_canvas
+                from reportlab.lib.units import inch
+                import datetime
+
+                nombre_archivo = f"ficha_inquilino_{datos[0].replace(' ', '_')}_{datos[1]}.pdf"
+
+                c = pdf_canvas.Canvas(nombre_archivo, pagesize=letter)
+                ancho, alto = letter
+
+                # Encabezado profesional
+                c.setFont("Helvetica-Bold", 18)
+                c.drawCentredString(ancho / 2, alto - 50, "FICHA COMPLETA DEL INQUILINO")
+
+                c.setFont("Helvetica-Bold", 14)
+                c.drawCentredString(ancho / 2, alto - 75, f"{datos[0]} - Apartamento {datos[1]}")
+
+                # Información detallada
+                y = alto - 120
+                c.setFont("Helvetica-Bold", 12)
+
+                sections = [
+                    ("INFORMACIÓN PERSONAL", [
+                        ("Nombre:", datos[0]),
+                        ("Identificación:", datos[3] or "No especificado"),
+                        ("Email:", datos[4] or "No especificado"),
+                        ("Celular:", datos[5] or "No especificado"),
+                        ("Profesión:", datos[6] or "No especificado")
+                    ]),
+                    ("INFORMACIÓN DEL ARRENDAMIENTO", [
+                        ("Apartamento:", datos[1]),
+                        ("Renta mensual:", f"${datos[2]:,.0f}" if datos[2] else "No especificado"),
+                        ("Estado:", datos[9] or "No especificado"),
+                        ("Fecha de ingreso:", datos[7] or "No especificado"),
+                        ("Depósito:", f"${datos[8]:,.0f}" if datos[8] else "No especificado")
+                    ]),
+                    ("CONTACTO DE EMERGENCIA", [
+                        ("Nombre:", datos[10] or "No especificado"),
+                        ("Teléfono:", datos[11] or "No especificado"),
+                        ("Relación:", datos[12] or "No especificado")
+                    ]),
+                    ("RESUMEN FINANCIERO", [
+                        ("Total pagado:", f"${total_pagado:,.0f}"),
+                        ("Número de pagos:", str(num_pagos)),
+                        ("Último pago:", f"{ultimo_pago[0]} - ${ultimo_pago[1]:,.0f}" if ultimo_pago else "Sin pagos")
+                    ])
+                ]
+
+                for section_title, section_data in sections:
+                    c.setFont("Helvetica-Bold", 12)
+                    y -= 25
+                    c.drawString(50, y, section_title)
+                    y -= 5
+                    c.line(50, y, ancho - 50, y)
+
+                    c.setFont("Helvetica", 10)
+                    for label, value in section_data:
+                        y -= 20
+                        c.drawString(70, y, label)
+                        c.drawString(200, y, str(value))
+
+                        if y < 100:
+                            c.showPage()
+                            y = alto - 50
+
+                # Notas al final
+                if datos[13] and datos[13].strip():
+                    y -= 30
+                    c.setFont("Helvetica-Bold", 12)
+                    c.drawString(50, y, "NOTAS ADICIONALES")
+                    y -= 20
+                    c.setFont("Helvetica", 10)
+
+                    # Dividir notas en líneas
+                    notas_lineas = datos[13].split('\n')
+                    for linea in notas_lineas:
+                        if y < 50:
+                            c.showPage()
+                            y = alto - 50
+                        c.drawString(70, y, linea[:80])
+                        y -= 15
+
+                # Pie de página
+                c.setFont("Helvetica-Oblique", 8)
+                c.drawCentredString(ancho / 2, 30,
+                                    f"Generado el {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+                c.save()
+                messagebox.showinfo("Ficha Generada", f"Ficha guardada como: {nombre_archivo}")
+
+                # Abrir PDF
+                try:
+                    import os
+                    os.startfile(nombre_archivo)
+                except:
+                    pass
+
+            except Exception as e:
+                raise Exception(f"Error generando ficha: {e}")
+
+        # Crear botones con mejor espaciado
+        ttk.Button(btn_row, text="✏️ Editar Inquilino",
+                   command=safe_edit, width=20).pack(side="left", padx=(0, 10))
+
+        ttk.Button(btn_row, text="📄 Generar Ficha PDF",
+                   command=safe_generate_pdf, width=20).pack(side="left", padx=(0, 10))
+
+        ttk.Button(btn_row, text="❌ Cerrar",
+                   command=details_window.destroy, width=15).pack(side="right")
+
+        # === CONFIGURACIÓN FINAL DE LA VENTANA ===
+
+        # Centrar ventana
+        details_window.update_idletasks()
+        width = 750
+        height = 680
+
+        screen_width = details_window.winfo_screenwidth()
+        screen_height = details_window.winfo_screenheight()
+
+        x = (screen_width // 2) - (width // 2)
+        y = 5
+
+        if y + height > screen_height - 50:
+            y = screen_height - height - 50
+
+        details_window.geometry(f'{width}x{height}+{x}+{y}')
+
+        # Configurar foco inicial en el canvas para que funcione el scroll
+        canvas.focus_set()
+        details_window.focus_force()
+
+        logging.info(f"Ventana de detalles abierta para inquilino: {datos[0]}")
+
+    def mostrar_formulario_editar(self, inquilino_id, datos):
+        """Abre ventana modal para editar inquilino con datos pre-cargados"""
+
+        # Marcar que hay ventana modal activa
+        self._add_modal_active = True
+
+        # Crear ventana modal
+        edit_window = tk.Toplevel()
+        edit_window.title(f"✏️ Editar Inquilino - {datos[0]}")
+        edit_window.geometry("750x650")
+        edit_window.resizable(True, True)
+        edit_window.transient(self.manager.root)
+        edit_window.grab_set()
+
+        # === SISTEMA DE SCROLL ===
+        main_frame = ttk.Frame(edit_window)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=5)
+
+        canvas = tk.Canvas(main_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Scroll con rueda del mouse
+        def modal_scroll(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            return "break"
+
+        edit_window.bind("<MouseWheel>", modal_scroll)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Función de cleanup
+        def cleanup_and_close():
+            try:
+                self._add_modal_active = False
+                edit_window.unbind("<MouseWheel>")
+                edit_window.destroy()
+            except Exception as e:
+                logging.error(f"Error en cleanup: {e}")
+
+        # Centrar ventana
+        edit_window.update_idletasks()
+        width = 750
+        height = 680
+        x = (edit_window.winfo_screenwidth() // 2) - (width // 2)
+        y = 5
+        edit_window.geometry(f'{width}x{height}+{x}+{y}')
+
+        # Crear formulario con datos pre-cargados
+        self.setup_edit_form_modal(scrollable_frame, edit_window, cleanup_and_close, inquilino_id, datos)
+
+        # Protocolo de cierre
+        edit_window.protocol("WM_DELETE_WINDOW", cleanup_and_close)
+
+        # Foco
+        edit_window.focus_force()
+
+        logging.info(f"Ventana de edición abierta para inquilino: {datos[0]}")
 
     def setup_edit_form_modal(self, parent, window, cleanup_function, inquilino_id, datos):
-        """Configura el formulario de edición en ventana modal con datos pre-cargados"""
+        """Configura el formulario de edición con calendario mejorado"""
 
         # Título
         title_frame = ttk.Frame(parent)
@@ -2173,12 +2285,12 @@ class TenantModule:
 
         ttk.Label(row1, text="Nombre completo:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.edit_nombre = ttk.Entry(row1, width=25)
-        self.edit_nombre.insert(0, datos[0] or "")  # Pre-cargar dato
+        self.edit_nombre.insert(0, datos[0] or "")
         self.edit_nombre.grid(row=0, column=1, sticky="ew", padx=(0, 20))
 
         ttk.Label(row1, text="Identificación:").grid(row=0, column=2, sticky="w", padx=(0, 10))
         self.edit_identificacion = ttk.Entry(row1, width=15)
-        self.edit_identificacion.insert(0, datos[3] or "")  # Pre-cargar dato
+        self.edit_identificacion.insert(0, datos[3] or "")
         self.edit_identificacion.grid(row=0, column=3, sticky="ew")
 
         row1.columnconfigure(1, weight=1)
@@ -2190,12 +2302,12 @@ class TenantModule:
 
         ttk.Label(row2, text="Email:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.edit_email = ttk.Entry(row2, width=25)
-        self.edit_email.insert(0, datos[4] or "")  # Pre-cargar dato
+        self.edit_email.insert(0, datos[4] or "")
         self.edit_email.grid(row=0, column=1, sticky="ew", padx=(0, 20))
 
         ttk.Label(row2, text="Celular:").grid(row=0, column=2, sticky="w", padx=(0, 10))
         self.edit_celular = ttk.Entry(row2, width=15)
-        self.edit_celular.insert(0, datos[5] or "")  # Pre-cargar dato
+        self.edit_celular.insert(0, datos[5] or "")
         self.edit_celular.grid(row=0, column=3, sticky="ew")
 
         row2.columnconfigure(1, weight=1)
@@ -2207,7 +2319,7 @@ class TenantModule:
 
         ttk.Label(row3, text="Profesión:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.edit_profesion = ttk.Entry(row3, width=40)
-        self.edit_profesion.insert(0, datos[6] or "")  # Pre-cargar dato
+        self.edit_profesion.insert(0, datos[6] or "")
         self.edit_profesion.grid(row=0, column=1, sticky="ew")
 
         row3.columnconfigure(1, weight=1)
@@ -2222,34 +2334,45 @@ class TenantModule:
 
         ttk.Label(rent_row1, text="Apartamento:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.edit_apto = ttk.Entry(rent_row1, width=10)
-        self.edit_apto.insert(0, datos[1] or "")  # Pre-cargar dato
+        self.edit_apto.insert(0, datos[1] or "")
         self.edit_apto.grid(row=0, column=1, sticky="w", padx=(0, 20))
 
         ttk.Label(rent_row1, text="Renta mensual:").grid(row=0, column=2, sticky="w", padx=(0, 10))
         self.edit_renta = ttk.Entry(rent_row1, width=15)
-        self.edit_renta.insert(0, str(datos[2]) if datos[2] else "")  # Pre-cargar dato
+        self.edit_renta.insert(0, str(datos[2]) if datos[2] else "")
         self.edit_renta.grid(row=0, column=3, sticky="w", padx=(0, 20))
 
         ttk.Label(rent_row1, text="Estado:").grid(row=0, column=4, sticky="w", padx=(0, 10))
         self.edit_estado = ttk.Combobox(rent_row1, width=12,
                                         values=["Activo", "Pendiente", "Inactivo", "Moroso", "Suspendido"])
-        self.edit_estado.set(datos[9] or "Activo")  # Pre-cargar dato
+        self.edit_estado.set(datos[9] or "Activo")
         self.edit_estado.grid(row=0, column=5, sticky="w")
 
-        # Fila arrendamiento 2
+        # Fila arrendamiento 2 - CON CALENDARIO MEJORADO
         rent_row2 = ttk.Frame(rental_frame)
         rent_row2.pack(fill="x", pady=5)
 
         ttk.Label(rent_row2, text="Fecha ingreso:").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        try:
-            from tkcalendar import DateEntry
-            self.edit_fecha = DateEntry(rent_row2, width=12,
-                                        background='darkblue',
+
+        # === SELECTOR DE FECHA MEJORADO PARA EDITAR ===
+        if CALENDAR_AVAILABLE:
+            # Usar DateEntry con calendario visual
+            self.edit_fecha = DateEntry(rent_row2,
+                                        width=12,
+                                        background='#007acc',
                                         foreground='white',
                                         borderwidth=2,
                                         date_pattern='yyyy-mm-dd',
                                         state='readonly',
-                                        showweeknumbers=False)
+                                        showweeknumbers=False,
+                                        locale='es_ES',
+                                        selectbackground='#0078d4',
+                                        selectforeground='white',
+                                        normalbackground='white',
+                                        normalforeground='black',
+                                        font=('Segoe UI', 9))
+
+            # Cargar fecha existente o fecha actual
             if datos[7]:  # Si hay fecha, cargarla
                 try:
                     fecha_obj = datetime.datetime.fromisoformat(datos[7]).date()
@@ -2258,14 +2381,16 @@ class TenantModule:
                     self.edit_fecha.set_date(datetime.date.today())
             else:
                 self.edit_fecha.set_date(datetime.date.today())
-        except ImportError:
+        else:
+            # Fallback a Entry normal
             self.edit_fecha = ttk.Entry(rent_row2, width=12)
             self.edit_fecha.insert(0, datos[7] or datetime.date.today().isoformat())
+
         self.edit_fecha.grid(row=0, column=1, sticky="w", padx=(0, 20))
 
         ttk.Label(rent_row2, text="Depósito:").grid(row=0, column=2, sticky="w", padx=(0, 10))
         self.edit_deposito = ttk.Entry(rent_row2, width=15)
-        self.edit_deposito.insert(0, str(datos[8]) if datos[8] else "")  # Pre-cargar dato
+        self.edit_deposito.insert(0, str(datos[8]) if datos[8] else "")
         self.edit_deposito.grid(row=0, column=3, sticky="w")
 
         # === CONTACTO DE EMERGENCIA ===
@@ -2362,10 +2487,18 @@ class TenantModule:
                    command=cleanup_function).pack(side="right")
 
     def seleccionar_archivo_edit_id(self):
-        """Selecciona nuevo archivo de identificación para edición"""
+        """Selecciona archivo de identificación"""
         try:
+            # Temporalmente desactivar topmost para el diálogo
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes'):
+                    try:
+                        window.attributes('-topmost', False)
+                    except:
+                        pass
+
             file_path = filedialog.askopenfilename(
-                title="Cambiar archivo de identificación",
+                title="Seleccionar archivo de identificación",
                 filetypes=[
                     ("Archivos de imagen", "*.jpg *.jpeg *.png *.pdf"),
                     ("Archivos PDF", "*.pdf"),
@@ -2373,6 +2506,15 @@ class TenantModule:
                     ("Todos los archivos", "*.*")
                 ]
             )
+
+            # Reactivar topmost después del diálogo
+            for window in self.manager.root.winfo_children():
+                if hasattr(window, 'attributes') and 'Agregar' in str(window.title):
+                    try:
+                        window.attributes('-topmost', True)
+                        window.lift()
+                    except:
+                        pass
 
             if file_path:
                 self.edit_id_file_path = file_path
@@ -2417,11 +2559,7 @@ class TenantModule:
             apto = self.edit_apto.get().strip()
             renta = self.edit_renta.get().strip()
             estado = self.edit_estado.get()
-            try:
-                fecha_ingreso = self.edit_fecha.get() if hasattr(self.edit_fecha,
-                                                                 'get') else self.edit_fecha.get_date().isoformat()
-            except:
-                fecha_ingreso = ""
+            fecha_ingreso = self.edit_fecha.get().strip()
             deposito = self.edit_deposito.get().strip()
             contacto_emergencia = self.edit_contacto.get().strip()
             telefono_emergencia = self.edit_tel_emergencia.get().strip()
@@ -2476,107 +2614,54 @@ class TenantModule:
                 self.edit_email.focus()
                 return
 
-            # Procesar archivos si se cambiaron
-            archivos_actualizados = {}
-
-            # Verificar si se seleccionó nuevo archivo de identificación
-            if hasattr(self, 'edit_id_file_path') and self.edit_id_file_path:
-                # Si la ruta actual no es la misma que tenía antes, es un archivo nuevo
-                conn = sqlite3.connect('edificio.db')
-                cursor = conn.cursor()
-                cursor.execute("SELECT archivo_identificacion FROM inquilinos WHERE id = ?", (inquilino_id,))
-                archivo_actual = cursor.fetchone()[0]
-                conn.close()
-
-                if self.edit_id_file_path != archivo_actual:
-                    # Es un archivo nuevo, copiarlo
-                    try:
-                        carpeta_inquilino = f"Archivos_Inquilinos/{inquilino_id}_{nombre.replace(' ', '_')}"
-                        if not os.path.exists(carpeta_inquilino):
-                            os.makedirs(carpeta_inquilino)
-
-                        extension = os.path.splitext(self.edit_id_file_path)[1]
-                        nuevo_nombre = f"identificacion_{inquilino_id}{extension}"
-                        ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
-
-                        shutil.copy2(self.edit_id_file_path, ruta_destino)
-                        archivos_actualizados['identificacion'] = ruta_destino
-                    except Exception as e:
-                        logging.error(f"Error copiando archivo ID: {e}")
-
-            # Verificar si se seleccionó nuevo archivo de contrato
-            if hasattr(self, 'edit_contract_file_path') and self.edit_contract_file_path:
-                conn = sqlite3.connect('edificio.db')
-                cursor = conn.cursor()
-                cursor.execute("SELECT archivo_contrato FROM inquilinos WHERE id = ?", (inquilino_id,))
-                archivo_actual = cursor.fetchone()[0]
-                conn.close()
-
-                if self.edit_contract_file_path != archivo_actual:
-                    # Es un archivo nuevo, copiarlo
-                    try:
-                        carpeta_inquilino = f"Archivos_Inquilinos/{inquilino_id}_{nombre.replace(' ', '_')}"
-                        if not os.path.exists(carpeta_inquilino):
-                            os.makedirs(carpeta_inquilino)
-
-                        extension = os.path.splitext(self.edit_contract_file_path)[1]
-                        nuevo_nombre = f"contrato_{inquilino_id}{extension}"
-                        ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
-
-                        shutil.copy2(self.edit_contract_file_path, ruta_destino)
-                        archivos_actualizados['contrato'] = ruta_destino
-                    except Exception as e:
-                        logging.error(f"Error copiando archivo contrato: {e}")
-
             # Actualizar base de datos
             conn = sqlite3.connect('edificio.db')
             cursor = conn.cursor()
 
             # Query base de actualización
-            update_query = """
+            cursor.execute("""
                 UPDATE inquilinos 
                 SET nombre = ?, apartamento = ?, renta = ?, identificacion = ?, email = ?, 
                     celular = ?, profesion = ?, fecha_ingreso = ?, deposito = ?, estado = ?,
                     contacto_emergencia = ?, telefono_emergencia = ?, relacion_emergencia = ?, notas = ?
-            """
-            update_params = [nombre, apto, renta, identificacion, email, celular, profesion,
-                             fecha_ingreso, deposito_valor, estado, contacto_emergencia,
-                             telefono_emergencia, relacion_emergencia, notas]
+                WHERE id = ?
+            """, (nombre, apto, renta, identificacion, email, celular, profesion,
+                  fecha_ingreso, deposito_valor, estado, contacto_emergencia,
+                  telefono_emergencia, relacion_emergencia, notas, inquilino_id))
 
-            # Agregar actualización de archivos si hay cambios
+            # PROCESAR ARCHIVOS ADJUNTOS EN EDICIÓN
+            archivos_actualizados = self.procesar_archivos_edicion(inquilino_id, nombre)
+
+            # Actualizar rutas de archivos en la base de datos si hay cambios
             if archivos_actualizados:
-                if 'identificacion' in archivos_actualizados:
-                    update_query += ", archivo_identificacion = ?, fecha_archivo_id = ?"
-                    update_params.extend([archivos_actualizados['identificacion'],
-                                          datetime.datetime.now().isoformat()])
+                archivo_id_final = archivos_actualizados.get('identificacion', None)
+                archivo_contrato_final = archivos_actualizados.get('contrato', None)
+                fecha_actual = datetime.datetime.now().isoformat()
 
-                if 'contrato' in archivos_actualizados:
-                    update_query += ", archivo_contrato = ?, fecha_archivo_contrato = ?"
-                    update_params.extend([archivos_actualizados['contrato'],
-                                          datetime.datetime.now().isoformat()])
+                cursor.execute("""
+                    UPDATE inquilinos 
+                    SET archivo_identificacion = COALESCE(?, archivo_identificacion),
+                        archivo_contrato = COALESCE(?, archivo_contrato),
+                        fecha_archivo_id = CASE WHEN ? IS NOT NULL THEN ? ELSE fecha_archivo_id END,
+                        fecha_archivo_contrato = CASE WHEN ? IS NOT NULL THEN ? ELSE fecha_archivo_contrato END
+                    WHERE id = ?
+                """, (archivo_id_final, archivo_contrato_final,
+                      archivo_id_final, fecha_actual if archivo_id_final else None,
+                      archivo_contrato_final, fecha_actual if archivo_contrato_final else None,
+                      inquilino_id))
 
-            update_query += " WHERE id = ?"
-            update_params.append(inquilino_id)
-
-            cursor.execute(update_query, update_params)
             conn.commit()
             conn.close()
 
             # Mensaje de éxito
-            mensaje_exito = f"Inquilino {nombre} actualizado exitosamente."
-            if archivos_actualizados:
-                archivos_info = []
-                if 'identificacion' in archivos_actualizados:
-                    archivos_info.append("identificación")
-                if 'contrato' in archivos_actualizados:
-                    archivos_info.append("contrato")
-                mensaje_exito += f"\n\nArchivos actualizados: {', '.join(archivos_info)}"
+            messagebox.showinfo("✅ Éxito", f"Inquilino {nombre} actualizado exitosamente.")
 
-            messagebox.showinfo("✅ Éxito", mensaje_exito)
-
-            # Recargar lista y estadísticas
-            self.cargar_inquilinos()
+            # Actualizar estadísticas
             self.actualizar_estadisticas()
+
+            # Recargar lista si existe
+            if hasattr(self, 'cargar_inquilinos_listado'):
+                self.cargar_inquilinos_listado()
 
             # Cerrar ventana modal
             cleanup_function()
@@ -2584,6 +2669,249 @@ class TenantModule:
         except Exception as e:
             logging.error(f"Error actualizando inquilino: {e}")
             messagebox.showerror("Error", f"Error actualizando inquilino: {e}")
+
+    def procesar_archivos_edicion(self, inquilino_id, nombre_inquilino):
+        """Procesa archivos adjuntos durante la edición"""
+        try:
+            archivos_procesados = {}
+
+            # Crear carpeta si no existe
+            carpeta_inquilino = f"Archivos_Inquilinos/{inquilino_id}_{nombre_inquilino.replace(' ', '_')}"
+            if not os.path.exists(carpeta_inquilino):
+                os.makedirs(carpeta_inquilino)
+
+            # Procesar archivo de identificación si cambió
+            if hasattr(self, 'edit_id_file_path') and self.edit_id_file_path:
+                # Verificar si es un archivo nuevo (no es la ruta existente)
+                if not self.edit_id_file_path.startswith("Archivos_Inquilinos"):
+                    extension = os.path.splitext(self.edit_id_file_path)[1]
+                    nuevo_nombre = f"identificacion_{inquilino_id}{extension}"
+                    ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
+
+                    shutil.copy2(self.edit_id_file_path, ruta_destino)
+                    archivos_procesados['identificacion'] = ruta_destino
+
+            # Procesar archivo de contrato si cambió
+            if hasattr(self, 'edit_contract_file_path') and self.edit_contract_file_path:
+                # Verificar si es un archivo nuevo
+                if not self.edit_contract_file_path.startswith("Archivos_Inquilinos"):
+                    extension = os.path.splitext(self.edit_contract_file_path)[1]
+                    nuevo_nombre = f"contrato_{inquilino_id}{extension}"
+                    ruta_destino = os.path.join(carpeta_inquilino, nuevo_nombre)
+
+                    shutil.copy2(self.edit_contract_file_path, ruta_destino)
+                    archivos_procesados['contrato'] = ruta_destino
+
+            return archivos_procesados
+
+        except Exception as e:
+            logging.error(f"Error procesando archivos en edición: {e}")
+            return {}
+
+    def actualizar_grafico_estados(self):
+        """Actualiza el gráfico de distribución por estados"""
+        try:
+            # Limpiar canvas
+            self.chart_canvas.delete("all")
+
+            # Obtener datos de estados
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT estado, COUNT(*) FROM inquilinos 
+                GROUP BY estado
+                ORDER BY COUNT(*) DESC
+            """)
+
+            datos = cursor.fetchall()
+            conn.close()
+
+            if not datos:
+                self.chart_canvas.create_text(125, 100, text="Sin datos", font=("Segoe UI", 12))
+                return
+
+            # Colores para cada estado
+            colores = {
+                'Activo': '#27ae60',
+                'Pendiente': '#f39c12',
+                'Moroso': '#e74c3c',
+                'Suspendido': '#8e44ad',
+                'Inactivo': '#95a5a6'
+            }
+
+            # Calcular total
+            total = sum(cantidad for _, cantidad in datos)
+
+            # Dibujar gráfico de barras horizontal simple
+            y_offset = 20
+            bar_height = 25
+            max_width = 180
+
+            for i, (estado, cantidad) in enumerate(datos):
+                # Calcular ancho de barra
+                bar_width = (cantidad / total) * max_width if total > 0 else 0
+
+                # Color de la barra
+                color = colores.get(estado, '#95a5a6')
+
+                # Dibujar barra
+                self.chart_canvas.create_rectangle(
+                    50, y_offset + i * (bar_height + 5),
+                        50 + bar_width, y_offset + i * (bar_height + 5) + bar_height,
+                    fill=color, outline=color
+                )
+
+                # Etiqueta del estado
+                self.chart_canvas.create_text(
+                    45, y_offset + i * (bar_height + 5) + bar_height // 2,
+                    text=estado[:8], anchor="e", font=("Segoe UI", 8)
+                )
+
+                # Cantidad
+                self.chart_canvas.create_text(
+                    55 + bar_width, y_offset + i * (bar_height + 5) + bar_height // 2,
+                    text=str(cantidad), anchor="w", font=("Segoe UI", 8, "bold")
+                )
+
+        except Exception as e:
+            logging.error(f"Error actualizando gráfico: {e}")
+            self.chart_canvas.create_text(125, 100, text="Error cargando gráfico", font=("Segoe UI", 10))
+
+    def actualizar_actividad_reciente(self):
+        """Actualiza la actividad reciente"""
+        try:
+            self.activity_text.config(state=tk.NORMAL)
+            self.activity_text.delete(1.0, tk.END)
+
+            # Obtener actividad reciente de pagos
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT p.fecha, i.nombre, i.apartamento, p.monto
+                FROM pagos p
+                JOIN inquilinos i ON p.inquilino_id = i.id
+                ORDER BY p.fecha DESC
+                LIMIT 10
+            """)
+
+            pagos_recientes = cursor.fetchall()
+
+            # Obtener inquilinos agregados recientemente
+            cursor.execute("""
+                SELECT nombre, apartamento, fecha_ingreso, estado
+                FROM inquilinos
+                WHERE fecha_ingreso IS NOT NULL
+                ORDER BY fecha_ingreso DESC
+                LIMIT 5
+            """)
+
+            nuevos_inquilinos = cursor.fetchall()
+            conn.close()
+
+            # Mostrar actividad
+            self.activity_text.insert(tk.END, "💰 PAGOS RECIENTES:\n", "header")
+
+            if pagos_recientes:
+                for fecha, nombre, apto, monto in pagos_recientes[:5]:
+                    fecha_formato = datetime.datetime.fromisoformat(fecha).strftime("%d/%m")
+                    self.activity_text.insert(tk.END, f"• {fecha_formato} - {nombre} (Apto {apto}): ${monto:,.0f}\n")
+            else:
+                self.activity_text.insert(tk.END, "• No hay pagos registrados\n")
+
+            self.activity_text.insert(tk.END, f"\n👥 NUEVOS INQUILINOS:\n", "header")
+
+            if nuevos_inquilinos:
+                for nombre, apto, fecha_ingreso, estado in nuevos_inquilinos[:3]:
+                    if fecha_ingreso:
+                        try:
+                            fecha_formato = datetime.datetime.fromisoformat(fecha_ingreso).strftime("%d/%m/%Y")
+                        except:
+                            fecha_formato = fecha_ingreso
+                        self.activity_text.insert(tk.END, f"• {nombre} - Apto {apto} ({fecha_formato})\n")
+            else:
+                self.activity_text.insert(tk.END, "• No hay nuevos inquilinos\n")
+
+            # Configurar tags para headers
+            self.activity_text.tag_configure("header", font=("Segoe UI", 9, "bold"))
+
+            self.activity_text.config(state=tk.DISABLED)
+
+        except Exception as e:
+            logging.error(f"Error actualizando actividad: {e}")
+            self.activity_text.config(state=tk.NORMAL)
+            self.activity_text.delete(1.0, tk.END)
+            self.activity_text.insert(tk.END, "Error cargando actividad reciente")
+            self.activity_text.config(state=tk.DISABLED)
+
+    def actualizar_metricas_adicionales(self):
+        """Actualiza las métricas adicionales"""
+        try:
+            conn = sqlite3.connect('edificio.db')
+            cursor = conn.cursor()
+
+            # Calcular ocupación (asumiendo 20 apartamentos totales, ajusta según tu edificio)
+            cursor.execute("SELECT COUNT(*) FROM inquilinos WHERE estado = 'Activo'")
+            activos = cursor.fetchone()[0] or 0
+
+            total_apartamentos = 20  # Ajusta este número según tu edificio
+            ocupacion = (activos / total_apartamentos) * 100 if total_apartamentos > 0 else 0
+
+            # Renta promedio
+            cursor.execute("SELECT AVG(renta) FROM inquilinos WHERE estado = 'Activo' AND renta > 0")
+            promedio_renta = cursor.fetchone()[0] or 0
+
+            # Último inquilino que ingresó
+            cursor.execute("""
+                SELECT nombre, fecha_ingreso FROM inquilinos 
+                WHERE fecha_ingreso IS NOT NULL 
+                ORDER BY fecha_ingreso DESC 
+                LIMIT 1
+            """)
+            ultimo_ingreso = cursor.fetchone()
+
+            conn.close()
+
+            # Actualizar labels
+            self.ocupacion_label.config(text=f"🏠 Ocupación: {ocupacion:.1f}%")
+            self.promedio_renta_label.config(text=f"💰 Renta Promedio: ${promedio_renta:,.0f}")
+
+            if ultimo_ingreso and ultimo_ingreso[1]:
+                try:
+                    fecha_formato = datetime.datetime.fromisoformat(ultimo_ingreso[1]).strftime("%d/%m/%Y")
+                    self.ultimo_ingreso_label.config(text=f"📅 Último Ingreso: {ultimo_ingreso[0]} ({fecha_formato})")
+                except:
+                    self.ultimo_ingreso_label.config(text=f"📅 Último Ingreso: {ultimo_ingreso[0]}")
+            else:
+                self.ultimo_ingreso_label.config(text="📅 Último Ingreso: N/A")
+
+        except Exception as e:
+            logging.error(f"Error actualizando métricas: {e}")
+
+    def obtener_fecha_modal(self):
+        """Obtiene la fecha del campo modal de forma segura"""
+        try:
+            if CALENDAR_AVAILABLE and hasattr(self.modal_fecha, 'get_date'):
+                # Es un DateEntry
+                return self.modal_fecha.get_date().isoformat()
+            else:
+                # Es un Entry normal
+                return self.modal_fecha.get().strip()
+        except:
+            return datetime.date.today().isoformat()
+
+    def obtener_fecha_edit(self):
+        """Obtiene la fecha del campo de edición de forma segura"""
+        try:
+            if CALENDAR_AVAILABLE and hasattr(self.edit_fecha, 'get_date'):
+                # Es un DateEntry
+                return self.edit_fecha.get_date().isoformat()
+            else:
+                # Es un Entry normal
+                return self.edit_fecha.get().strip()
+        except:
+            return datetime.date.today().isoformat()
 
 class PaymentModule:
     def __init__(self, manager):
